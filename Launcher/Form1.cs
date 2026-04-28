@@ -1,4 +1,6 @@
-﻿using System;
+using System;
+using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.IO.Compression;
 using System.Diagnostics;
@@ -11,9 +13,45 @@ namespace Launcher
     {
         string root = AppDomain.CurrentDomain.BaseDirectory;
 
+        // Автосохранения
+        private bool autoSaveActive = false;
+        private System.Windows.Forms.Timer autoSaveTimer;
+        private string autoSaveFolder;
+        private int autoSaveCounter = 0;
+        private string autoSaveSessionDate;
+        private string autoSaveConfigPath;
+        private Dictionary<string, DateTime> lastModified = new Dictionary<string, DateTime>();
+        private Button btnAutoSave;
+        private Label hintLabel;
+
         public Form1()
         {
+            this.DoubleBuffered = true;
+            this.SetStyle(
+                ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.AllPaintingInWmPaint
+                | ControlStyles.UserPaint, true);
+            this.UpdateStyles();
+
             InitializeComponent();
+            autoSaveConfigPath = Path.Combine(root, "autosave_status.txt");
+        }
+
+        private void btnStartPlain_Click(object sender, EventArgs e)
+        {
+            // Если игра уже запущена — просто скрываемся/закрываемся
+            if (Process.GetProcessesByName("H5_Game").Length > 0)
+            {
+                if (autoSaveActive)
+                    this.Hide();
+                else
+                    Application.Exit();
+                return;
+            }
+
+            string binPath = Path.Combine(root, "bin");
+            string gameExe = Path.Combine(binPath, "H5_Game.exe");
+            StartGame(binPath, gameExe);
         }
 
         private void btnStart_Click(object sender, EventArgs e)
@@ -42,39 +80,36 @@ namespace Launcher
 
             try
             {
-                // 1️⃣ Копируем только Mode_Modifier
-                // 🟢 Mode_Modifier (НЕ КРИТИЧЕСКИЙ, лаунчер не падает)
-if (File.Exists(modePak))
-{
-    try
-    {
-        File.Copy(modePak, tempPak, true);
+                // Сначала ВСЕГДА закрываем игру
+                KillProcess("H5_Game");
 
-        KillProcess("H5_Game");
+                // Mode_Modifier (НЕ КРИТИЧЕСКИЙ)
+                if (File.Exists(modePak))
+                {
+                    try
+                    {
+                        File.Copy(modePak, tempPak, true);
+                        File.Copy(tempPak, modePak, true);
 
-        File.Copy(tempPak, modePak, true);
+                        if (File.Exists(tempPak))
+                            File.Delete(tempPak);
+                    }
+                    catch (Exception ex)
+                    {
+                        MessageBox.Show(
+                            "⚠ Ошибка Mode_Modifier (игнорируется):\n" + ex.Message,
+                            "Предупреждение",
+                            MessageBoxButtons.OK,
+                            MessageBoxIcon.Warning
+                        );
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("Mode_Modifier.pak отсутствует, пропуск");
+                }
 
-        if (File.Exists(tempPak))
-            File.Delete(tempPak);
-    }
-    catch (Exception ex)
-    {
-        // ❗ просто лог, без краша
-        MessageBox.Show(
-            "⚠ Ошибка Mode_Modifier (игнорируется):\n" + ex.Message,
-            "Предупреждение",
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Warning
-        );
-    }
-}
-else
-{
-    // 🟢 файла нет — это НЕ ошибка
-    Console.WriteLine("Mode_Modifier.pak отсутствует, пропуск");
-}
-
-                // 4️⃣ 🔥 Обновляем ВСЕ архивы
+                // Обновляем архивы
                 UpdateZipDate(modePak);
 
                 string universePak = Path.Combine(dataPath, "Universe_mod.pak");
@@ -90,10 +125,9 @@ else
                 if (!IsPatched(mapFile))
                     UpdateZipDate(mapFile);
 
-                // 5️⃣ Если режим мода
+                // Если режим мода
                 if (useMod)
                 {
-                    // ❗ Chebovka — КРИТИЧЕСКИЙ файл
                     if (!File.Exists(modSource))
                     {
                         MessageBox.Show(
@@ -102,8 +136,6 @@ else
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Error
                         );
-
-                        // 🔥 завершение лаунчера
                         Application.Exit();
                         return;
                     }
@@ -120,13 +152,12 @@ else
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Error
                         );
-
                         Application.Exit();
                         return;
                     }
                 }
 
-                // 6️⃣ Запуск
+                // Запуск
                 StartGame(binPath, gameExe);
             }
             catch (Exception ex)
@@ -159,8 +190,15 @@ else
                     UseShellExecute = true
                 });
 
-                // 🔥 закрываем лаунчер после запуска игры
-                Application.Exit();
+                if (!autoSaveActive)
+                {
+                    Application.Exit();
+                }
+                else
+                {
+                    // Скрываем лаунчер — работает в фоне
+                    this.Hide();
+                }
             }
             catch (Exception ex)
             {
@@ -196,7 +234,6 @@ else
                         }
                     }
 
-                    // 🔥 ДОБАВЛЯЕМ ФЛАГ
                     var flag = target.CreateEntry("_patched.flag");
                     using (var writer = new StreamWriter(flag.Open()))
                     {
@@ -212,6 +249,7 @@ else
                 Console.WriteLine("ZIP error: " + ex.Message);
             }
         }
+
         bool IsPatched(string zipPath)
         {
             try
@@ -230,60 +268,384 @@ else
             }
         }
 
+        // ===================== КОНФИГ АВТОСОХРАНЕНИЙ =====================
+
+        private void WriteAutoSaveConfig(string status)
+        {
+            try
+            {
+                string content = status + "\n"
+                    + (autoSaveSessionDate ?? "") + "\n"
+                    + autoSaveCounter.ToString();
+                File.WriteAllText(autoSaveConfigPath, content);
+            }
+            catch { }
+        }
+
+        private string ReadAutoSaveStatus()
+        {
+            try
+            {
+                if (!File.Exists(autoSaveConfigPath))
+                    return "off";
+                string[] lines = File.ReadAllLines(autoSaveConfigPath);
+                if (lines.Length > 0)
+                    return lines[0].Trim();
+            }
+            catch { }
+            return "off";
+        }
+
+        private void LoadAutoSaveConfig()
+        {
+            try
+            {
+                if (!File.Exists(autoSaveConfigPath))
+                    return;
+                string[] lines = File.ReadAllLines(autoSaveConfigPath);
+                if (lines.Length >= 2 && !string.IsNullOrEmpty(lines[1].Trim()))
+                    autoSaveSessionDate = lines[1].Trim();
+                if (lines.Length >= 3)
+                    int.TryParse(lines[2].Trim(), out autoSaveCounter);
+
+                if (autoSaveSessionDate != null)
+                {
+                    string folder = Path.Combine(root, "Автосохранения", autoSaveSessionDate);
+                    if (Directory.Exists(folder))
+                        autoSaveFolder = folder;
+                }
+            }
+            catch { }
+        }
+
+        // ===================== АВТОСОХРАНЕНИЯ =====================
+
+        private void StartAutoSaveMonitoring()
+        {
+            lastModified.Clear();
+            foreach (string saveFile in GetAllSaveFiles())
+            {
+                if (File.Exists(saveFile))
+                    lastModified[saveFile] = File.GetLastWriteTime(saveFile);
+            }
+
+            autoSaveTimer = new System.Windows.Forms.Timer();
+            autoSaveTimer.Interval = 2000;
+            autoSaveTimer.Tick += AutoSaveTimer_Tick;
+            autoSaveTimer.Start();
+        }
+
+        private void btnAutoSave_Click(object sender, EventArgs e)
+        {
+            if (!autoSaveActive)
+            {
+                // Включаем
+                autoSaveActive = true;
+
+                if (autoSaveSessionDate == null)
+                {
+                    autoSaveCounter = 0;
+                    autoSaveFolder = null;
+                    autoSaveSessionDate = DateTime.Now.ToString("MM.dd.yy_HH.mm");
+                }
+
+                StartAutoSaveMonitoring();
+                WriteAutoSaveConfig("on");
+
+                btnAutoSave.BackColor = Color.FromArgb(0, 100, 0);
+                btnAutoSave.Text = "Автосохранения ✓";
+            }
+            else
+            {
+                // Выключаем
+                autoSaveActive = false;
+                StopAutoSave();
+                WriteAutoSaveConfig("off");
+
+                btnAutoSave.BackColor = Color.FromArgb(40, 40, 40);
+                btnAutoSave.Text = "Автосохранения";
+            }
+        }
+
+        private void StopAutoSave()
+        {
+            if (autoSaveTimer != null)
+            {
+                autoSaveTimer.Stop();
+                autoSaveTimer.Dispose();
+                autoSaveTimer = null;
+            }
+        }
+
+        private List<string> GetAllSaveFiles()
+        {
+            var result = new List<string>();
+            string profilesPath = Path.Combine(root, "UniverseTeam", "Universe Mod", "Profiles");
+
+            if (!Directory.Exists(profilesPath))
+                return result;
+
+            foreach (string profileDir in Directory.GetDirectories(profilesPath))
+            {
+                string savesDir = Path.Combine(profileDir, "Saves");
+                if (!Directory.Exists(savesDir))
+                    continue;
+
+                for (int i = 0; i <= 2; i++)
+                {
+                    string saveFile = Path.Combine(savesDir, "save_" + i + ".sav");
+                    result.Add(saveFile);
+                }
+            }
+
+            return result;
+        }
+
+        private void AutoSaveTimer_Tick(object sender, EventArgs e)
+        {
+            // Проверяем конфиг — другой экземпляр мог выключить
+            if (ReadAutoSaveStatus() != "on")
+            {
+                autoSaveActive = false;
+                StopAutoSave();
+                Application.Exit();
+                return;
+            }
+
+            var changedFiles = new List<string>();
+
+            foreach (string saveFile in GetAllSaveFiles())
+            {
+                if (!File.Exists(saveFile))
+                    continue;
+
+                DateTime currentMod = File.GetLastWriteTime(saveFile);
+
+                if (lastModified.ContainsKey(saveFile))
+                {
+                    if (currentMod > lastModified[saveFile])
+                    {
+                        changedFiles.Add(saveFile);
+                        lastModified[saveFile] = currentMod;
+                    }
+                }
+                else
+                {
+                    // Файл появился впервые — новое сохранение
+                    lastModified[saveFile] = currentMod;
+                    changedFiles.Add(saveFile);
+                }
+            }
+
+            if (changedFiles.Count > 0)
+            {
+                autoSaveTimer.Stop();
+
+                var delayTimer = new System.Windows.Forms.Timer();
+                delayTimer.Interval = 2000;
+                delayTimer.Tick += (s, ev) =>
+                {
+                    delayTimer.Stop();
+                    delayTimer.Dispose();
+
+                    // Создаём папку при первом реальном сохранении
+                    if (autoSaveFolder == null)
+                    {
+                        autoSaveFolder = Path.Combine(root, "Автосохранения", autoSaveSessionDate);
+                        Directory.CreateDirectory(autoSaveFolder);
+                    }
+
+                    foreach (string file in changedFiles)
+                    {
+                        try
+                        {
+                            string newName = GetNextSaveName() + ".sav";
+                            string destPath = Path.Combine(autoSaveFolder, newName);
+                            File.Copy(file, destPath, true);
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.WriteLine("Ошибка копирования сейва: " + ex.Message);
+                        }
+                    }
+
+                    WriteAutoSaveConfig("on");
+
+                    if (autoSaveActive && autoSaveTimer != null)
+                        autoSaveTimer.Start();
+                };
+                delayTimer.Start();
+            }
+        }
+
+        /// <summary>
+        /// Нумерация: 111-117, 121-127, 131-137, 141-147, 211-217, ...
+        /// Единицы: 1-7, Десятки: 1-4, Сотни: 1+
+        /// </summary>
+        private string GetNextSaveName()
+        {
+            int units = (autoSaveCounter % 7) + 1;
+            int tens = ((autoSaveCounter / 7) % 4) + 1;
+            int hundreds = (autoSaveCounter / 28) + 1;
+
+            autoSaveCounter++;
+
+            return hundreds.ToString() + tens.ToString() + units.ToString();
+        }
+
+        private void SetHoverHint(Button btn, string hint)
+        {
+            btn.MouseEnter += (s, ev) =>
+            {
+                hintLabel.Text = hint;
+                hintLabel.BackColor = Color.FromArgb(120, 0, 0, 0);
+            };
+            btn.MouseLeave += (s, ev) =>
+            {
+                hintLabel.Text = "";
+                hintLabel.BackColor = Color.Transparent;
+            };
+        }
+
+        // ===================== ЗАГРУЗКА ФОРМЫ =====================
+
         private void Form1_Load(object sender, EventArgs e)
         {
-            // 🖼 ФОН
-            this.BackgroundImage = Image.FromFile(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bg.jpg"));
+            // ФОН
+            this.BackgroundImage = Image.FromFile(
+                Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "bg.jpg"));
             this.BackgroundImageLayout = ImageLayout.Stretch;
 
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.BackColor = Color.Black;
+            this.ClientSize = new Size(600, 430);
+            this.Text = "ModLauncher";
 
-            // 🧱 ПАНЕЛЬ (стеклянный блок)
-            Panel panel = new Panel();
-            panel.Size = new Size(500, 300);
-            panel.Location = new Point(50, 50);
+            // ОСНОВНАЯ ПАНЕЛЬ (с двойной буферизацией)
+            Panel panel = new DoubleBufferedPanel();
+            panel.Size = new Size(500, 290);
+            panel.Location = new Point(50, 60);
             panel.BackColor = Color.FromArgb(150, 0, 0, 0);
             this.Controls.Add(panel);
 
-            // 📝 ЗАГОЛОВОК
+            // ЗАГОЛОВОК
             Label title = new Label();
             title.Text = "GAME LAUNCHER";
             title.ForeColor = Color.White;
-            title.Font = new Font("Segoe UI", 18, FontStyle.Bold);
+            title.Font = new Font("Segoe UI", 24, FontStyle.Bold);
             title.AutoSize = true;
-            title.Location = new Point(20, 20);
+            title.Location = new Point(
+                (panel.Width - 310) / 2, 20);
             panel.Controls.Add(title);
 
-            // 📝 СТАТУС
-            Label status = new Label();
-            status.Text = "Status: Ready";
-            status.ForeColor = Color.White;
-            status.Font = new Font("Segoe UI", 10);
-            status.AutoSize = true;
-            status.Location = new Point(20, 70);
-            panel.Controls.Add(status);
+            // Размеры и отступы для сетки 2x2
+            int btnW = 220;
+            int btnH = 50;
+            int gapX = 20;
+            int gapY = 15;
+            int startX = (panel.Width - btnW * 2 - gapX) / 2;
+            int startY = 110;
 
-            // 🔘 КНОПКИ СТИЛЬ
+            // КНОПКА ЗАПУСК ИГРЫ (без изменений)
+            Button btnStartPlain = new Button();
+            btnStartPlain.Parent = panel;
+            btnStartPlain.Text = "Запуск игры";
+            btnStartPlain.FlatStyle = FlatStyle.Flat;
+            btnStartPlain.FlatAppearance.BorderSize = 0;
+            btnStartPlain.BackColor = Color.FromArgb(40, 40, 40);
+            btnStartPlain.ForeColor = Color.White;
+            btnStartPlain.Font = new Font("Segoe UI", 11, FontStyle.Regular);
+            btnStartPlain.Size = new Size(btnW, btnH);
+            btnStartPlain.Location = new Point(startX, startY);
+            btnStartPlain.Click += btnStartPlain_Click;
+
+            // КНОПКА ЗАПУСК С ОБНОВЛЕНИЕМ
+            btnStart.Parent = panel;
+            btnStart.Text = "Запуск с обновлением";
             btnStart.FlatStyle = FlatStyle.Flat;
+            btnStart.FlatAppearance.BorderSize = 0;
             btnStart.BackColor = Color.FromArgb(40, 40, 40);
             btnStart.ForeColor = Color.White;
-            btnStart.FlatAppearance.BorderSize = 0;
-            btnStart.Size = new Size(150, 40);
-            btnStart.Location = new Point(20, 200);
+            btnStart.Font = new Font("Segoe UI", 11, FontStyle.Regular);
+            btnStart.Size = new Size(btnW, btnH);
+            btnStart.Location = new Point(startX + btnW + gapX, startY);
 
+            // КНОПКА МОДА
+            btnStartMod.Parent = panel;
+            btnStartMod.Text = "Запуск мода";
             btnStartMod.FlatStyle = FlatStyle.Flat;
-            btnStartMod.BackColor = Color.FromArgb(70, 20, 20);
-            btnStartMod.ForeColor = Color.White;
             btnStartMod.FlatAppearance.BorderSize = 0;
-            btnStartMod.Size = new Size(150, 40);
-            btnStartMod.Location = new Point(200, 200);
+            btnStartMod.BackColor = Color.FromArgb(80, 0, 0);
+            btnStartMod.ForeColor = Color.White;
+            btnStartMod.Font = new Font("Segoe UI", 11, FontStyle.Regular);
+            btnStartMod.Size = new Size(btnW, btnH);
+            btnStartMod.Location = new Point(startX, startY + btnH + gapY);
 
-            // 📦 КНОПКИ ВНУТРЬ ПАНЕЛИ
-            panel.Controls.Add(btnStart);
-            panel.Controls.Add(btnStartMod);
+            // КНОПКА АВТОСОХРАНЕНИЯ
+            btnAutoSave = new Button();
+            btnAutoSave.Parent = panel;
+            btnAutoSave.FlatStyle = FlatStyle.Flat;
+            btnAutoSave.FlatAppearance.BorderSize = 0;
+            btnAutoSave.ForeColor = Color.White;
+            btnAutoSave.Font = new Font("Segoe UI", 11, FontStyle.Regular);
+            btnAutoSave.Size = new Size(btnW, btnH);
+            btnAutoSave.Location = new Point(startX + btnW + gapX, startY + btnH + gapY);
+            btnAutoSave.Click += btnAutoSave_Click;
+
+            // ПОДСКАЗКА (полупрозрачная, внизу панели)
+            hintLabel = new Label();
+            hintLabel.Parent = panel;
+            hintLabel.Text = "";
+            hintLabel.ForeColor = Color.FromArgb(200, 255, 255, 255);
+            hintLabel.BackColor = Color.FromArgb(120, 0, 0, 0);
+            hintLabel.Font = new Font("Segoe UI", 10, FontStyle.Italic);
+            hintLabel.Size = new Size(panel.Width - 40, 40);
+            hintLabel.Location = new Point(20, panel.Height - 50);
+            hintLabel.TextAlign = ContentAlignment.MiddleCenter;
+            hintLabel.BackColor = Color.Transparent;
+
+            // Привязываем события наведения
+            SetHoverHint(btnStartPlain, "Обычный запуск игры без каких-либо изменений");
+            SetHoverHint(btnStart, "Запуск с обновлением архивов и файлов мода");
+            SetHoverHint(btnStartMod, "Дополнительно загружает мод Chebovka");
+            SetHoverHint(btnAutoSave, "Мониторинг и копирование автосохранений игры");
+
+            // Восстанавливаем состояние из конфига
+            if (ReadAutoSaveStatus() == "on")
+            {
+                LoadAutoSaveConfig();
+                autoSaveActive = true;
+
+                btnAutoSave.BackColor = Color.FromArgb(0, 100, 0);
+                btnAutoSave.Text = "Автосохранения ✓";
+            }
+            else
+            {
+                btnAutoSave.BackColor = Color.FromArgb(40, 40, 40);
+                btnAutoSave.Text = "Автосохранения";
+            }
+        }
+
+        protected override void OnFormClosing(FormClosingEventArgs e)
+        {
+            StopAutoSave();
+            if (autoSaveActive)
+                WriteAutoSaveConfig("off");
+            base.OnFormClosing(e);
+        }
+    }
+
+    public class DoubleBufferedPanel : Panel
+    {
+        public DoubleBufferedPanel()
+        {
+            this.DoubleBuffered = true;
+            this.SetStyle(
+                ControlStyles.OptimizedDoubleBuffer
+                | ControlStyles.AllPaintingInWmPaint
+                | ControlStyles.UserPaint, true);
+            this.UpdateStyles();
         }
     }
 }
