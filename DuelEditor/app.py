@@ -139,4 +139,4 @@ if __name__ == "__main__":
     for f, creatures in sorted(factions.items()):
         print(f"  {f}: {len(creatures)} creatures")
 
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="127.0.0.1", port=5000, debug=False)

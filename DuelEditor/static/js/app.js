@@ -1,5 +1,15 @@
 /* Heroes 5 Duel Preset Editor - Frontend Logic */
 
+function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
 let allCreatures = {};       // {faction: [creature, ...]}
 let factions = [];            // [{name, creature_count}]
 let presetState = {
@@ -366,7 +376,7 @@ function savePreset() {
     body.innerHTML = `
         <div class="save-dialog-content">
             <input type="text" id="save-preset-name" placeholder="Название пресета"
-                   value="${state.name || ""}">
+                   value="${escapeHtml(state.name)}">
             <div class="save-dialog-actions">
                 <button class="btn" onclick="closeSaveDialog()">Отмена</button>
                 <button class="btn btn-save" onclick="doSavePreset()">Сохранить</button>
@@ -412,21 +422,29 @@ async function showLoadDialog() {
 
     let listHtml = "";
     if (presets.length === 0) {
-        listHtml = '<p style="color:var(--text-dim);text-align:center;padding:20px;">Нет сохранённых пресетов</p>';
+        body.innerHTML = '<div class="save-dialog-content"><p style="color:var(--text-dim);text-align:center;padding:20px;">Нет сохранённых пресетов</p></div>';
     } else {
-        listHtml = '<div class="preset-list">';
+        body.innerHTML = '<div class="save-dialog-content"><div class="preset-list" id="preset-list-container"></div></div>';
+        const listContainer = document.getElementById("preset-list-container");
         for (const name of presets) {
-            listHtml += `
-                <div class="preset-item" onclick="doLoadPreset('${name}')">
-                    <span class="preset-name">${name}</span>
-                    <button class="preset-delete" onclick="event.stopPropagation(); doDeletePreset('${name}')">&times;</button>
-                </div>
-            `;
-        }
-        listHtml += '</div>';
-    }
+            const item = document.createElement("div");
+            item.className = "preset-item";
+            item.addEventListener("click", () => doLoadPreset(name));
 
-    body.innerHTML = `<div class="save-dialog-content">${listHtml}</div>`;
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "preset-name";
+            nameSpan.textContent = name;
+            item.appendChild(nameSpan);
+
+            const delBtn = document.createElement("button");
+            delBtn.className = "preset-delete";
+            delBtn.innerHTML = "&times;";
+            delBtn.addEventListener("click", (e) => { e.stopPropagation(); doDeletePreset(name); });
+            item.appendChild(delBtn);
+
+            listContainer.appendChild(item);
+        }
+    }
     dialog.style.display = "flex";
 }
 
