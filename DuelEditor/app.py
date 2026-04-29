@@ -292,7 +292,7 @@ def on_player_ready(data):
         room["players"][sid]["ready"] = True
         room["players"][sid]["build"] = build
     # For offline mode, also mark P2
-    if room.get("offline") and data.get("player_num") == 2:
+    if room.get("offline"):
         p2_key = f"offline_p2_{sid}"
         if p2_key in room["players"]:
             room["players"][p2_key]["ready"] = True
