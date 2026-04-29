@@ -1,522 +1,927 @@
-/* Heroes 5 Duel Preset Editor - Frontend Logic */
+/* Heroes 5 Duel Builder — Client */
 
-function escapeHtml(str) {
-    if (!str) return "";
-    return String(str)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
+const socket = io();
+let gameData = null;
+let roomId = null;
+let playerNum = 0;
+let myFaction = '';
+let isOffline = false;
 
-let allCreatures = {};       // {faction: [creature, ...]}
-let factions = [];            // [{name, creature_count}]
-let presetState = {
-    name: "",
-    player1: {
-        name: "Игрок 1",
-        hero: { level: 1, attack: 0, defense: 0, spellpower: 0, knowledge: 0 },
-        army: [null, null, null, null, null, null, null]
-    },
-    player2: {
-        name: "Игрок 2",
-        hero: { level: 1, attack: 0, defense: 0, spellpower: 0, knowledge: 0 },
-        army: [null, null, null, null, null, null, null]
-    }
+// Player state
+const STARTING_GOLD = 120000;
+const MAX_ADDITIONAL_SKILLS = 5;
+let state = {
+    gold: STARTING_GOLD,
+    level: 1,
+    stats: { offence: 0, defence: 0, spellpower: 0, knowledge: 0 },
+    baseStats: { offence: 0, defence: 0, spellpower: 0, knowledge: 0 },
+    skills: [],      // [{skill_id, mastery}]
+    perks: [],       // [perk_id, ...]
+    army: [null, null, null, null, null, null, null],
+    artifacts: [],   // [artifact_id, ...]
+    equippedSlots: {},
+    spells: [],      // [spell_id, ...]
+    extraLevelsBought: 0,
+    statsBonusBought: false,
+    heroClass: '',
+    hero: null,
+    levelingDone: false,
+    guildSpells: null,
+    artifactShop: null,
 };
 
-let currentModalPlayer = 0;
-let currentModalSlot = 0;
-let currentModalFaction = "";
+let p2State = null; // for offline mode
 
-/* ---------- Init ---------- */
-document.addEventListener("DOMContentLoaded", async () => {
-    await loadFactions();
-    populateFactionSelectors();
+// Leveling state
+let currentLevelOptions = null;
+
+function escapeHtml(text) {
+    const d = document.createElement('div');
+    d.textContent = text;
+    return d.innerHTML;
+}
+
+// ---- Socket Events ----
+socket.on('connected', () => console.log('Connected'));
+
+socket.on('room_created', (data) => {
+    roomId = data.room_id;
+    playerNum = data.player_num;
+    showScreen('waiting-screen');
+    document.getElementById('waiting-info').textContent =
+        `IP: ${data.ip}:${data.port} | Комната: ${data.name}`;
 });
 
-async function loadFactions() {
-    const resp = await fetch("/api/factions");
-    factions = await resp.json();
-}
+socket.on('room_joined', (data) => {
+    roomId = data.room_id;
+    playerNum = data.player_num;
+    showScreen('waiting-screen');
+    document.getElementById('waiting-title').textContent = 'Подключено! Ожидание...';
+});
 
-async function loadAllCreatures() {
-    if (Object.keys(allCreatures).length > 0) return;
-    const resp = await fetch("/api/creatures");
-    allCreatures = await resp.json();
-}
-
-function populateFactionSelectors() {
-    for (const playerId of [1, 2]) {
-        const select = document.getElementById(`player${playerId}-faction`);
-        for (const f of factions) {
-            const opt = document.createElement("option");
-            opt.value = f.name;
-            opt.textContent = `${f.name} (${f.creature_count})`;
-            select.appendChild(opt);
-        }
-    }
-}
-
-/* ---------- Army Management ---------- */
-function loadCreatures(playerId) {
-    // Faction selector changed - just cosmetic, real selection in modal
-}
-
-function openCreatureSelector(playerId, slotIndex) {
-    currentModalPlayer = playerId;
-    currentModalSlot = slotIndex;
-    loadAllCreatures().then(() => {
-        renderModal();
-        document.getElementById("creature-modal").style.display = "flex";
-    });
-}
-
-function closeModal() {
-    document.getElementById("creature-modal").style.display = "none";
-    document.getElementById("creature-search-input").value = "";
-}
-
-function renderModal(filterFaction) {
-    const tabsContainer = document.getElementById("modal-faction-tabs");
-    tabsContainer.innerHTML = "";
-
-    // "All" tab
-    const allTab = document.createElement("div");
-    allTab.className = `modal-tab ${!filterFaction ? "active" : ""}`;
-    allTab.textContent = "Все";
-    allTab.onclick = () => { currentModalFaction = ""; renderModal(); };
-    tabsContainer.appendChild(allTab);
-
-    for (const f of factions) {
-        const tab = document.createElement("div");
-        tab.className = `modal-tab ${filterFaction === f.name ? "active" : ""}`;
-        tab.textContent = f.name;
-        tab.onclick = () => { currentModalFaction = f.name; renderModal(f.name); };
-        tabsContainer.appendChild(tab);
-    }
-
-    renderCreatureGrid(filterFaction);
-}
-
-function renderCreatureGrid(filterFaction) {
-    const grid = document.getElementById("creature-grid");
-    grid.innerHTML = "";
-
-    const searchVal = document.getElementById("creature-search-input").value.toLowerCase();
-
-    const factionsToShow = filterFaction ? [filterFaction] : Object.keys(allCreatures).sort();
-
-    for (const faction of factionsToShow) {
-        const creatures = allCreatures[faction] || [];
-        for (const c of creatures) {
-            if (searchVal && !c.name.toLowerCase().includes(searchVal) &&
-                !c.id.toLowerCase().includes(searchVal)) {
-                continue;
-            }
-            const card = createCreatureCard(c);
-            grid.appendChild(card);
-        }
-    }
-}
-
-function createCreatureCard(creature) {
-    const card = document.createElement("div");
-    card.className = `creature-card ${creature.upgrade ? "upgrade-creature" : ""}`;
-
-    const tierColor = `tier-${creature.tier}`;
-
-    let iconHtml;
-    if (creature.has_icon) {
-        iconHtml = `<img src="/api/icon/${creature.id}" alt="${creature.name}" loading="lazy">`;
-    } else {
-        iconHtml = `<div class="no-icon">?</div>`;
-    }
-
-    card.innerHTML = `
-        ${iconHtml}
-        <div class="card-name">${creature.name}</div>
-        <div class="card-tier ${tierColor}">Тир ${creature.tier} ${creature.upgrade ? "▲" : ""}</div>
-        <div class="card-stats">
-            <span>⚔${creature.attack}</span>
-            <span>🛡${creature.defense}</span>
-            <span>❤${creature.health}</span>
-            <span>⚡${creature.speed}</span>
-        </div>
-        <div class="creature-count-input">
-            <input type="number" min="1" max="9999" value="1" id="count-${creature.id}"
-                   onclick="event.stopPropagation()">
-            <button onclick="event.stopPropagation(); selectCreature('${creature.id}')">OK</button>
-        </div>
-    `;
-
-    card.addEventListener("mouseenter", (e) => showTooltip(e, creature));
-    card.addEventListener("mouseleave", hideTooltip);
-    card.addEventListener("mousemove", moveTooltip);
-
-    card.addEventListener("dblclick", () => {
-        document.getElementById(`count-${creature.id}`).value = 1;
-        selectCreature(creature.id);
-    });
-
-    return card;
-}
-
-function selectCreature(creatureId) {
-    const countInput = document.getElementById(`count-${creatureId}`);
-    const count = parseInt(countInput?.value) || 1;
-
-    let creature = null;
-    for (const faction of Object.values(allCreatures)) {
-        for (const c of faction) {
-            if (c.id === creatureId) {
-                creature = c;
-                break;
-            }
-        }
-        if (creature) break;
-    }
-
-    if (!creature) return;
-
-    const player = currentModalPlayer === 1 ? presetState.player1 : presetState.player2;
-    player.army[currentModalSlot] = {
-        id: creature.id,
-        name: creature.name,
-        count: count,
-        tier: creature.tier,
-        upgrade: creature.upgrade,
-        has_icon: creature.has_icon,
-        power: creature.power,
-        faction: creature.faction
-    };
-
-    closeModal();
-    renderArmySlots(currentModalPlayer);
-    updateArmyPower(currentModalPlayer);
-}
-
-function removeCreature(playerId, slotIndex, event) {
-    event.stopPropagation();
-    const player = playerId === 1 ? presetState.player1 : presetState.player2;
-    player.army[slotIndex] = null;
-    renderArmySlots(playerId);
-    updateArmyPower(playerId);
-}
-
-function renderArmySlots(playerId) {
-    const player = playerId === 1 ? presetState.player1 : presetState.player2;
-    const container = document.getElementById(`player${playerId}-army`);
-    const slots = container.querySelectorAll(".army-slot");
-
-    slots.forEach((slot, idx) => {
-        const creature = player.army[idx];
-        if (!creature) {
-            slot.className = "army-slot";
-            slot.innerHTML = `<div class="slot-empty">+</div>`;
-            slot.onclick = () => openCreatureSelector(playerId, idx);
-        } else {
-            slot.className = "army-slot filled";
-            const tierColor = `tier-${creature.tier}`;
-            let iconHtml;
-            if (creature.has_icon) {
-                iconHtml = `<img src="/api/icon/${creature.id}" alt="${creature.name}">`;
-            } else {
-                iconHtml = `<div class="slot-no-icon">?</div>`;
-            }
-            slot.innerHTML = `
-                <span class="slot-tier-badge ${tierColor}">${creature.tier}</span>
-                <button class="slot-remove" onclick="removeCreature(${playerId}, ${idx}, event)">×</button>
-                <div class="slot-creature">
-                    ${iconHtml}
-                    <div class="creature-name">${creature.name}</div>
-                    <input type="number" class="creature-count" value="${creature.count}" min="1" max="9999"
-                           onclick="event.stopPropagation()"
-                           onchange="updateCreatureCount(${playerId}, ${idx}, this.value)"
-                           style="width:50px;background:var(--bg-dark);border:1px solid var(--border);border-radius:3px;color:var(--accent-gold);text-align:center;font-size:11px;font-weight:bold;padding:1px;">
-                </div>
-            `;
-            slot.onclick = () => openCreatureSelector(playerId, idx);
-        }
-    });
-}
-
-function updateCreatureCount(playerId, slotIndex, value) {
-    const player = playerId === 1 ? presetState.player1 : presetState.player2;
-    if (player.army[slotIndex]) {
-        player.army[slotIndex].count = parseInt(value) || 1;
-        updateArmyPower(playerId);
-    }
-}
-
-function updateArmyPower(playerId) {
-    const player = playerId === 1 ? presetState.player1 : presetState.player2;
-    let totalPower = 0;
-    for (const slot of player.army) {
-        if (slot) {
-            totalPower += slot.power * slot.count;
-        }
-    }
-    document.getElementById(`player${playerId}-power`).textContent =
-        `Сила армии: ${totalPower.toLocaleString()}`;
-}
-
-/* ---------- Tooltip ---------- */
-function showTooltip(event, creature) {
-    const tooltip = document.getElementById("creature-tooltip");
-
-    let statsHtml = `
-        <div class="tooltip-stats">
-            <span class="stat-label">Атака:</span><span class="stat-value">${creature.attack}</span>
-            <span class="stat-label">Защита:</span><span class="stat-value">${creature.defense}</span>
-            <span class="stat-label">Урон:</span><span class="stat-value">${creature.min_damage}-${creature.max_damage}</span>
-            <span class="stat-label">Здоровье:</span><span class="stat-value">${creature.health}</span>
-            <span class="stat-label">Скорость:</span><span class="stat-value">${creature.speed}</span>
-            <span class="stat-label">Инициатива:</span><span class="stat-value">${creature.initiative}</span>
-            <span class="stat-label">Выстрелы:</span><span class="stat-value">${creature.shots || "—"}</span>
-            <span class="stat-label">Полёт:</span><span class="stat-value">${creature.flying ? "Да" : "Нет"}</span>
-            <span class="stat-label">Размер:</span><span class="stat-value">${creature.combat_size}</span>
-            <span class="stat-label">Стоимость:</span><span class="stat-value">${creature.gold_cost} зол.</span>
-            <span class="stat-label">Опыт:</span><span class="stat-value">${creature.exp}</span>
-            <span class="stat-label">Сила:</span><span class="stat-value">${creature.power}</span>
-        </div>
-    `;
-
-    let abilitiesHtml = "";
-    if (creature.abilities && creature.abilities.length > 0) {
-        const abilNames = creature.abilities.map(a =>
-            a.replace("ABILITY_", "").replace(/_/g, " ").toLowerCase()
-        ).join(", ");
-        abilitiesHtml = `<div class="tooltip-abilities">Способности: ${abilNames}</div>`;
-    }
-
-    let descHtml = "";
-    if (creature.description) {
-        descHtml = `<div class="tooltip-desc">${creature.description}</div>`;
-    }
-
-    tooltip.innerHTML = `
-        <h4>${creature.name} <span class="tier-${creature.tier}">(Тир ${creature.tier}${creature.upgrade ? " ▲" : ""})</span></h4>
-        ${statsHtml}
-        ${abilitiesHtml}
-        ${descHtml}
-    `;
-
-    tooltip.style.display = "block";
-    moveTooltip(event);
-}
-
-function moveTooltip(event) {
-    const tooltip = document.getElementById("creature-tooltip");
-    const x = event.clientX + 15;
-    const y = event.clientY + 15;
-    const maxX = window.innerWidth - tooltip.offsetWidth - 10;
-    const maxY = window.innerHeight - tooltip.offsetHeight - 10;
-    tooltip.style.left = Math.min(x, maxX) + "px";
-    tooltip.style.top = Math.min(y, maxY) + "px";
-}
-
-function hideTooltip() {
-    document.getElementById("creature-tooltip").style.display = "none";
-}
-
-/* ---------- Filter ---------- */
-function filterCreatures() {
-    renderCreatureGrid(currentModalFaction);
-}
-
-/* ---------- Hero Stats ---------- */
-function updateHeroStats(playerId) {
-    // Placeholder for future hero leveling mechanics
-}
-
-/* ---------- Preset State Management ---------- */
-function gatherPresetState() {
-    for (const p of [1, 2]) {
-        const player = p === 1 ? presetState.player1 : presetState.player2;
-        player.name = document.getElementById(`player${p}-name`).value;
-        player.hero.level = parseInt(document.getElementById(`player${p}-hero-level`).value) || 1;
-        player.hero.attack = parseInt(document.getElementById(`player${p}-hero-attack`).value) || 0;
-        player.hero.defense = parseInt(document.getElementById(`player${p}-hero-defense`).value) || 0;
-        player.hero.spellpower = parseInt(document.getElementById(`player${p}-hero-spellpower`).value) || 0;
-        player.hero.knowledge = parseInt(document.getElementById(`player${p}-hero-knowledge`).value) || 0;
-    }
-    return presetState;
-}
-
-function applyPresetState(state) {
-    presetState = state;
-    for (const p of [1, 2]) {
-        const player = p === 1 ? presetState.player1 : presetState.player2;
-        document.getElementById(`player${p}-name`).value = player.name || `Игрок ${p}`;
-        document.getElementById(`player${p}-hero-level`).value = player.hero?.level || 1;
-        document.getElementById(`player${p}-hero-attack`).value = player.hero?.attack || 0;
-        document.getElementById(`player${p}-hero-defense`).value = player.hero?.defense || 0;
-        document.getElementById(`player${p}-hero-spellpower`).value = player.hero?.spellpower || 0;
-        document.getElementById(`player${p}-hero-knowledge`).value = player.hero?.knowledge || 0;
-
-        // Ensure army has 7 slots
-        if (!player.army) player.army = [null, null, null, null, null, null, null];
-        while (player.army.length < 7) player.army.push(null);
-
-        renderArmySlots(p);
-        updateArmyPower(p);
-    }
-}
-
-/* ---------- Save/Load ---------- */
-function savePreset() {
-    const state = gatherPresetState();
-    const dialog = document.getElementById("save-dialog");
-    const title = document.getElementById("save-dialog-title");
-    const body = document.getElementById("save-dialog-body");
-
-    title.textContent = "Сохранить пресет";
-    body.innerHTML = `
-        <div class="save-dialog-content">
-            <input type="text" id="save-preset-name" placeholder="Название пресета"
-                   value="${escapeHtml(state.name)}">
-            <div class="save-dialog-actions">
-                <button class="btn" onclick="closeSaveDialog()">Отмена</button>
-                <button class="btn btn-save" onclick="doSavePreset()">Сохранить</button>
-            </div>
-        </div>
-    `;
-    dialog.style.display = "flex";
-    document.getElementById("save-preset-name").focus();
-}
-
-async function doSavePreset() {
-    const name = document.getElementById("save-preset-name").value.trim();
-    if (!name) {
-        alert("Введите название пресета");
+socket.on('rooms_list', (data) => {
+    const list = document.getElementById('rooms-list');
+    if (!data.rooms.length) {
+        list.innerHTML = '<p style="color:#888">Нет доступных комнат</p>';
         return;
     }
-    const state = gatherPresetState();
-    state.name = name;
-    presetState.name = name;
+    list.innerHTML = data.rooms.map(r =>
+        `<div class="room-item"><span>${escapeHtml(r.name)}</span>
+         <button onclick="joinRoom('${r.room_id}')">Войти</button></div>`
+    ).join('');
+});
 
-    const resp = await fetch("/api/preset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(state)
+socket.on('factions_assigned', (data) => {
+    roomId = data.room_id;
+    const assignments = data.assignments;
+    myFaction = assignments[String(playerNum)];
+    loadGameData().then(() => {
+        initBuilder();
+        showScreen('builder-screen');
+    });
+});
+
+socket.on('player_status', (data) => {
+    console.log('Player status:', data);
+});
+
+socket.on('preset_generated', (data) => {
+    showScreen('done-screen');
+    document.getElementById('done-message').textContent = data.message;
+});
+
+socket.on('error', (data) => {
+    alert(data.message);
+});
+
+// ---- Lobby ----
+function createRoom() {
+    document.getElementById('room-name-input').style.display = 'block';
+}
+
+function confirmCreateRoom() {
+    const name = document.getElementById('room-name').value || 'Дуэль';
+    socket.emit('create_room', { name });
+}
+
+function refreshRooms() {
+    socket.emit('list_rooms', {});
+}
+
+function joinRoom(rid) {
+    socket.emit('join_room', { room_id: rid });
+}
+
+function startOffline() {
+    isOffline = true;
+    playerNum = 1;
+    socket.emit('start_offline', {});
+}
+
+function showScreen(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+}
+
+// ---- Data Loading ----
+async function loadGameData() {
+    const resp = await fetch('/api/game-data');
+    gameData = await resp.json();
+}
+
+// ---- Builder Init ----
+function initBuilder() {
+    // Find hero class for faction
+    const classMap = {
+        'Haven': 'HERO_CLASS_KNIGHT', 'Inferno': 'HERO_CLASS_DEMON_LORD',
+        'Necropolis': 'HERO_CLASS_NECROMANCER', 'Preserve': 'HERO_CLASS_RANGER',
+        'Academy': 'HERO_CLASS_WIZARD', 'Dungeon': 'HERO_CLASS_WARLOCK',
+        'Dwarf': 'HERO_CLASS_RUNEMAGE', 'Orcs': 'HERO_CLASS_BARBARIAN',
+    };
+    state.heroClass = classMap[myFaction] || '';
+
+    // Pick a random hero from faction
+    const factionHeroes = gameData.heroes[myFaction] || [];
+    if (factionHeroes.length) {
+        state.hero = factionHeroes[Math.floor(Math.random() * factionHeroes.length)];
+        // Add starting stats
+        state.baseStats = {
+            offence: state.hero.offence || 0,
+            defence: state.hero.defence || 0,
+            spellpower: state.hero.spellpower || 0,
+            knowledge: state.hero.knowledge || 0,
+        };
+        state.stats = { ...state.baseStats };
+        // Add starting skills
+        if (state.hero.starting_skills) {
+            state.skills = state.hero.starting_skills.map(s => ({
+                skill_id: s.skill_id, mastery: s.mastery
+            }));
+        }
+        if (state.hero.starting_perks) {
+            state.perks = [...state.hero.starting_perks];
+        }
+        if (state.hero.starting_spells) {
+            state.spells = [...state.hero.starting_spells];
+        }
+    }
+
+    // Generate artifact shop
+    generateArtifactShop();
+
+    // Generate guild spells
+    generateGuildSpells();
+
+    // UI setup
+    document.getElementById('player-faction').textContent = myFaction;
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.onclick = () => switchTab(btn.dataset.tab);
     });
 
-    if (resp.ok) {
-        closeSaveDialog();
-    } else {
-        alert("Ошибка сохранения");
+    updateUI();
+    startLevelUp();
+}
+
+function switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    document.querySelector(`[data-tab="${tab}"]`).classList.add('active');
+    document.getElementById(`tab-${tab}`).classList.add('active');
+    if (tab === 'army') renderArmy();
+    if (tab === 'artifacts') renderArtifacts();
+    if (tab === 'spells') renderSpells();
+}
+
+// ---- UI Update ----
+function updateUI() {
+    document.getElementById('player-gold').textContent = `\u{1F4B0} ${state.gold.toLocaleString()}`;
+    document.getElementById('player-level').textContent = `\u0423\u0440. ${state.level}`;
+    document.getElementById('player-stats').innerHTML = [
+        `<span class="stat stat-atk">\u2694 ${state.stats.offence}</span>`,
+        `<span class="stat stat-def">\u{1F6E1} ${state.stats.defence}</span>`,
+        `<span class="stat stat-sp">\u2728 ${state.stats.spellpower}</span>`,
+        `<span class="stat stat-kn">\u{1F4D6} ${state.stats.knowledge}</span>`,
+    ].join('');
+
+    // Skills list
+    const skillsList = document.getElementById('skills-list');
+    let html = '';
+    for (const sk of state.skills) {
+        const skillData = findSkill(sk.skill_id);
+        const name = skillData ? skillData.name : sk.skill_id;
+        const masteryLabel = sk.mastery.replace('MASTERY_', '');
+        const mc = `mastery-${masteryLabel.toLowerCase()}`;
+        html += `<span class="skill-tag">
+            ${skillData && skillData.has_icon ? `<img src="/api/icon/skill_${sk.skill_id}" onerror="this.style.display='none'">` : ''}
+            ${escapeHtml(name)} <span class="mastery-badge ${mc}">${masteryLabel}</span>
+        </span>`;
     }
-}
-
-async function showLoadDialog() {
-    const dialog = document.getElementById("save-dialog");
-    const title = document.getElementById("save-dialog-title");
-    const body = document.getElementById("save-dialog-body");
-
-    title.textContent = "Загрузить пресет";
-
-    const resp = await fetch("/api/presets");
-    const presets = await resp.json();
-
-    let listHtml = "";
-    if (presets.length === 0) {
-        body.innerHTML = '<div class="save-dialog-content"><p style="color:var(--text-dim);text-align:center;padding:20px;">Нет сохранённых пресетов</p></div>';
-    } else {
-        body.innerHTML = '<div class="save-dialog-content"><div class="preset-list" id="preset-list-container"></div></div>';
-        const listContainer = document.getElementById("preset-list-container");
-        for (const name of presets) {
-            const item = document.createElement("div");
-            item.className = "preset-item";
-            item.addEventListener("click", () => doLoadPreset(name));
-
-            const nameSpan = document.createElement("span");
-            nameSpan.className = "preset-name";
-            nameSpan.textContent = name;
-            item.appendChild(nameSpan);
-
-            const delBtn = document.createElement("button");
-            delBtn.className = "preset-delete";
-            delBtn.innerHTML = "&times;";
-            delBtn.addEventListener("click", (e) => { e.stopPropagation(); doDeletePreset(name); });
-            item.appendChild(delBtn);
-
-            listContainer.appendChild(item);
-        }
+    for (const pid of state.perks) {
+        const perkData = findSkill(pid);
+        const name = perkData ? perkData.name : pid;
+        html += `<span class="skill-tag perk-tag">
+            ${perkData && perkData.has_icon ? `<img src="/api/icon/skill_${pid}" onerror="this.style.display='none'">` : ''}
+            ${escapeHtml(name)}
+        </span>`;
     }
-    dialog.style.display = "flex";
+    skillsList.innerHTML = html;
 }
 
-async function doLoadPreset(name) {
-    const resp = await fetch(`/api/preset/${encodeURIComponent(name)}`);
-    if (resp.ok) {
-        const data = await resp.json();
-        applyPresetState(data);
-        closeSaveDialog();
-    } else {
-        alert("Ошибка загрузки");
+// ---- Helpers ----
+function findSkill(skillId) {
+    return (gameData.skills || []).find(s => s.id === skillId);
+}
+
+function getHeroClassData() {
+    return gameData.hero_classes[state.heroClass] || { skill_probs: {}, attribute_probs: {} };
+}
+
+function weightedRandom(probs) {
+    const entries = Object.entries(probs).filter(([_, p]) => p > 0);
+    const total = entries.reduce((s, [_, p]) => s + p, 0);
+    if (total === 0) return null;
+    let r = Math.random() * total;
+    for (const [key, p] of entries) {
+        r -= p;
+        if (r <= 0) return key;
     }
+    return entries[entries.length - 1][0];
 }
 
-async function doDeletePreset(name) {
-    if (!confirm(`Удалить пресет "${name}"?`)) return;
-    await fetch(`/api/preset/${encodeURIComponent(name)}`, { method: "DELETE" });
-    showLoadDialog();
-}
-
-function closeSaveDialog() {
-    document.getElementById("save-dialog").style.display = "none";
-}
-
-/* ---------- Export/Import ---------- */
-function exportPreset() {
-    const state = gatherPresetState();
-    const json = JSON.stringify(state, null, 2);
-    const blob = new Blob([json], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${state.name || "duel_preset"}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-}
-
-function importPreset() {
-    document.getElementById("import-file-input").click();
-}
-
-function handleImport(event) {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        try {
-            const data = JSON.parse(e.target.result);
-            applyPresetState(data);
-        } catch (err) {
-            alert("Ошибка чтения файла: " + err.message);
-        }
+function getClassSkillId() {
+    const classSkillMap = {
+        'HERO_CLASS_KNIGHT': 'HERO_SKILL_TRAINING',
+        'HERO_CLASS_DEMON_LORD': 'HERO_SKILL_GATING',
+        'HERO_CLASS_NECROMANCER': 'HERO_SKILL_NECROMANCY',
+        'HERO_CLASS_RANGER': 'HERO_SKILL_AVENGER',
+        'HERO_CLASS_WIZARD': 'HERO_SKILL_ARTIFICIER',
+        'HERO_CLASS_WARLOCK': 'HERO_SKILL_INVOCATION',
+        'HERO_CLASS_RUNEMAGE': 'HERO_SKILL_RUNELORE',
+        'HERO_CLASS_BARBARIAN': 'HERO_SKILL_DEMONIC_RAGE',
     };
-    reader.readAsText(file);
-    event.target.value = "";
+    return classSkillMap[state.heroClass] || '';
 }
 
-/* ---------- Reset ---------- */
-function resetPreset() {
-    if (!confirm("Сбросить все настройки?")) return;
-    presetState = {
-        name: "",
-        player1: {
-            name: "Игрок 1",
-            hero: { level: 1, attack: 0, defense: 0, spellpower: 0, knowledge: 0 },
-            army: [null, null, null, null, null, null, null]
+function getAdditionalSkillCount() {
+    const classSkill = getClassSkillId();
+    return state.skills.filter(s => s.skill_id !== classSkill).length;
+}
+
+function canLearnNewSkill(skillId) {
+    if (state.skills.find(s => s.skill_id === skillId)) return false;
+    const skillData = findSkill(skillId);
+    if (!skillData || skillData.skill_type !== 'SKILLTYPE_SKILL') return false;
+    if (skillData.hero_class !== 'HERO_CLASS_NONE' && skillData.hero_class !== state.heroClass) return false;
+    return true;
+}
+
+function getPromotableSkills() {
+    return state.skills.filter(sk => {
+        if (sk.mastery === 'MASTERY_EXPERT') return false;
+        const skillData = findSkill(sk.skill_id);
+        if (!skillData) return false;
+        const maxLevel = skillData.levels || 3;
+        const masteryOrder = ['MASTERY_BASIC', 'MASTERY_ADVANCED', 'MASTERY_EXPERT'];
+        const currentIdx = masteryOrder.indexOf(sk.mastery);
+        return currentIdx < maxLevel - 1;
+    });
+}
+
+function getAvailablePerks(primaryFirst) {
+    const allPerks = (gameData.skills || []).filter(s =>
+        s.skill_type !== 'SKILLTYPE_SKILL' && s.id !== 'HERO_SKILL_NONE'
+    );
+
+    const available = allPerks.filter(perk => {
+        if (state.perks.includes(perk.id)) return false;
+        if (perk.hero_class !== 'HERO_CLASS_NONE' && perk.hero_class !== state.heroClass) return false;
+        if (perk.basic_skill_id && perk.basic_skill_id !== 'HERO_SKILL_NONE') {
+            if (!state.skills.find(s => s.skill_id === perk.basic_skill_id)) return false;
+        }
+        for (const prereq of (perk.prerequisites || [])) {
+            if (!state.perks.includes(prereq)) return false;
+        }
+        return true;
+    });
+
+    const primary = available.filter(p =>
+        (p.skill_type === 'SKILLTYPE_STANDART_PERK' || p.skill_type === 'SKILLTYPE_CLASS_PERK') &&
+        (!p.prerequisites || p.prerequisites.length === 0)
+    );
+    const secondary = available.filter(p =>
+        (p.skill_type === 'SKILLTYPE_SPECIAL_PERK' || p.skill_type === 'SKILLTYPE_UINQUE_PERK') ||
+        (p.prerequisites && p.prerequisites.length > 0)
+    );
+
+    if (primaryFirst) {
+        if (primary.length > 0) return primary[Math.floor(Math.random() * primary.length)];
+        if (secondary.length > 0) return secondary[Math.floor(Math.random() * secondary.length)];
+    } else {
+        if (secondary.length > 0) return secondary[Math.floor(Math.random() * secondary.length)];
+        if (primary.length > 0) return primary[Math.floor(Math.random() * primary.length)];
+    }
+    return null;
+}
+
+// ---- LEVELING ----
+function startLevelUp() {
+    if (state.level >= 20) {
+        finishLeveling();
+        return;
+    }
+    generateLevelOptions();
+}
+
+function generateLevelOptions() {
+    const hc = getHeroClassData();
+    const options = { tl: null, bl: null, tr: null, br: null };
+
+    // Random stat gain
+    const statGained = weightedRandom(hc.attribute_probs || {});
+    if (statGained) {
+        state.stats[statGained] = (state.stats[statGained] || 0) + 1;
+    }
+    const statNames = { offence: 'Нападение', defence: 'Защита', spellpower: 'Сила магии', knowledge: 'Знание' };
+    document.getElementById('stat-gained').textContent =
+        statGained ? `+1 ${statNames[statGained] || statGained}` : '';
+
+    // Top-Left: New skill or random promote
+    const additionalCount = getAdditionalSkillCount();
+    if (additionalCount < MAX_ADDITIONAL_SKILLS) {
+        const newSkillId = pickNewSkill(hc);
+        if (newSkillId) {
+            options.tl = { type: 'new_skill', skill_id: newSkillId };
+        }
+    } else {
+        const promotable = getPromotableSkills();
+        if (promotable.length > 0) {
+            const sk = promotable[Math.floor(Math.random() * promotable.length)];
+            options.tl = { type: 'promote', skill_id: sk.skill_id };
+        }
+    }
+
+    // Bottom-Left: Promote existing or new base
+    const promotable = getPromotableSkills();
+    if (promotable.length > 1 || (promotable.length === 1 && options.tl)) {
+        const sk = promotable[Math.floor(Math.random() * promotable.length)];
+        if (!options.tl || options.tl.skill_id !== sk.skill_id) {
+            options.bl = { type: 'promote', skill_id: sk.skill_id };
+        } else if (promotable.length > 1) {
+            const other = promotable.filter(s => s.skill_id !== sk.skill_id);
+            options.bl = { type: 'promote', skill_id: other[0].skill_id };
+        }
+    } else if (promotable.length === 1 && !options.tl) {
+        // Only 1 promotable and no new skills available: move to TL
+        options.tl = { type: 'promote', skill_id: promotable[0].skill_id };
+        options.bl = null;
+    } else if (promotable.length === 0) {
+        if (additionalCount < MAX_ADDITIONAL_SKILLS) {
+            const newSkillId = pickNewSkill(hc);
+            if (newSkillId && (!options.tl || options.tl.skill_id !== newSkillId)) {
+                options.bl = { type: 'new_skill', skill_id: newSkillId };
+            }
+        }
+    }
+
+    // Top-Right: Primary perk
+    options.tr = getAvailablePerks(true);
+    if (options.tr) options.tr = { type: 'perk', perk_id: options.tr.id, perk: options.tr };
+
+    // Bottom-Right: Secondary perk
+    options.br = getAvailablePerks(false);
+    if (options.br) {
+        if (options.tr && options.br.id === options.tr.perk_id) {
+            const alt = getAvailablePerks(true);
+            options.br = alt && alt.id !== options.tr.perk_id
+                ? { type: 'perk', perk_id: alt.id, perk: alt } : null;
+        } else {
+            options.br = { type: 'perk', perk_id: options.br.id, perk: options.br };
+        }
+    }
+
+    currentLevelOptions = options;
+    renderLevelOptions();
+}
+
+function pickNewSkill(hc) {
+    const probs = { ...(hc.skill_probs || {}) };
+    for (const sk of state.skills) {
+        delete probs[sk.skill_id];
+    }
+    // Filter out skills that can't be learned
+    for (const sid of Object.keys(probs)) {
+        if (!canLearnNewSkill(sid)) delete probs[sid];
+    }
+    return weightedRandom(probs);
+}
+
+function renderLevelOptions() {
+    document.getElementById('current-level').textContent = state.level;
+    const slotIds = ['tl', 'bl', 'tr', 'br'];
+    for (const id of slotIds) {
+        const slot = document.getElementById(`slot-${id}`);
+        const content = document.getElementById(`slot-${id}-content`);
+        const opt = currentLevelOptions[id];
+        slot.classList.remove('empty', 'selected');
+        if (!opt) {
+            slot.classList.add('empty');
+            content.innerHTML = '<span style="color:#555">—</span>';
+            continue;
+        }
+        if (opt.type === 'new_skill') {
+            const sk = findSkill(opt.skill_id);
+            content.innerHTML = `<div class="skill-name">${escapeHtml(sk ? sk.name : opt.skill_id)}</div>
+                <span class="mastery-badge mastery-basic">BASIC</span>
+                <div class="skill-desc">Новый навык</div>`;
+        } else if (opt.type === 'promote') {
+            const sk = findSkill(opt.skill_id);
+            const current = state.skills.find(s => s.skill_id === opt.skill_id);
+            const next = current?.mastery === 'MASTERY_BASIC' ? 'ADVANCED' : 'EXPERT';
+            content.innerHTML = `<div class="skill-name">${escapeHtml(sk ? sk.name : opt.skill_id)}</div>
+                <span class="mastery-badge mastery-${next.toLowerCase()}">${next}</span>
+                <div class="skill-desc">Повышение навыка</div>`;
+        } else if (opt.type === 'perk') {
+            const pk = opt.perk;
+            content.innerHTML = `<div class="skill-name">${escapeHtml(pk ? pk.name : opt.perk_id)}</div>
+                <div class="skill-desc">${escapeHtml((pk && pk.description) ? pk.description.substring(0, 100) : 'Перк')}</div>`;
+        }
+    }
+    document.getElementById('levelup-slots').style.display = '';
+    document.getElementById('post-leveling').style.display = 'none';
+    updateUI();
+}
+
+function chooseLevelOption(slotId) {
+    if (!currentLevelOptions) return;
+    const opt = currentLevelOptions[slotId];
+    if (!opt) return;
+
+    if (opt.type === 'new_skill') {
+        state.skills.push({ skill_id: opt.skill_id, mastery: 'MASTERY_BASIC' });
+    } else if (opt.type === 'promote') {
+        const sk = state.skills.find(s => s.skill_id === opt.skill_id);
+        if (sk) {
+            if (sk.mastery === 'MASTERY_BASIC') sk.mastery = 'MASTERY_ADVANCED';
+            else if (sk.mastery === 'MASTERY_ADVANCED') sk.mastery = 'MASTERY_EXPERT';
+        }
+    } else if (opt.type === 'perk') {
+        if (!state.perks.includes(opt.perk_id)) {
+            state.perks.push(opt.perk_id);
+        }
+    }
+
+    state.level++;
+    currentLevelOptions = null;
+
+    if (state.level >= 20) {
+        finishLeveling();
+    } else {
+        startLevelUp();
+    }
+    updateUI();
+}
+
+function finishLeveling() {
+    state.levelingDone = true;
+    document.getElementById('levelup-slots').style.display = 'none';
+    document.getElementById('post-leveling').style.display = '';
+    document.getElementById('current-level').textContent = state.level;
+    document.getElementById('stat-gained').textContent = 'Прокачка завершена!';
+    updateBuyLevelCost();
+    if (state.statsBonusBought) {
+        document.getElementById('buy-stats-btn').disabled = true;
+    }
+    updateUI();
+}
+
+function updateBuyLevelCost() {
+    const cost = 8000 + state.extraLevelsBought * 2000;
+    document.getElementById('buy-level-cost').textContent = cost.toLocaleString();
+}
+
+function buyExtraLevel() {
+    const cost = 8000 + state.extraLevelsBought * 2000;
+    if (state.gold < cost) { alert('Недостаточно золота!'); return; }
+    state.gold -= cost;
+    state.extraLevelsBought++;
+    state.level++;
+
+    // Stat gain
+    const hc = getHeroClassData();
+    const statGained = weightedRandom(hc.attribute_probs || {});
+    if (statGained) state.stats[statGained] = (state.stats[statGained] || 0) + 1;
+
+    updateBuyLevelCost();
+    document.getElementById('current-level').textContent = state.level;
+    updateUI();
+}
+
+function showBuyStats() {
+    if (state.statsBonusBought) { alert('Уже куплено!'); return; }
+    if (state.gold < 5000) { alert('Недостаточно золота!'); return; }
+    document.getElementById('buy-stats-modal').style.display = 'flex';
+}
+
+function buyStats(stat) {
+    if (state.statsBonusBought || state.gold < 5000) return;
+    state.gold -= 5000;
+    state.stats[stat] = (state.stats[stat] || 0) + 2;
+    state.statsBonusBought = true;
+    document.getElementById('buy-stats-btn').disabled = true;
+    closeBuyStats();
+    updateUI();
+}
+
+function closeBuyStats() {
+    document.getElementById('buy-stats-modal').style.display = 'none';
+}
+
+// ---- ARMY ----
+function renderArmy() {
+    const slotsDiv = document.getElementById('army-slots');
+    let html = '';
+    for (let i = 0; i < 7; i++) {
+        const slot = state.army[i];
+        if (slot) {
+            html += `<div class="army-slot filled">
+                <button class="remove-btn" onclick="removeArmy(${i})">x</button>
+                ${slot.has_icon ? `<img src="/api/icon/creature_${slot.creature_id}" onerror="this.style.display='none'">` : ''}
+                <div class="creature-name">${escapeHtml(slot.name)}</div>
+                <div class="creature-count">x${slot.count}</div>
+                <div style="font-size:0.75em;color:#e94560">${(slot.gold_cost * slot.count).toLocaleString()} \u{1F4B0}</div>
+                ${getUpgradeOptions(slot, i)}
+            </div>`;
+        } else {
+            html += `<div class="army-slot"><div style="color:#555;margin-top:40px">Слот ${i + 1}</div></div>`;
+        }
+    }
+    slotsDiv.innerHTML = html;
+
+    // Creature shop
+    const shopDiv = document.getElementById('creature-shop');
+    const creatures = gameData.creatures[myFaction] || [];
+    let shopHtml = '<h4>Доступные существа:</h4>';
+    const tiers = {};
+    for (const c of creatures) {
+        if (!tiers[c.tier]) tiers[c.tier] = [];
+        tiers[c.tier].push(c);
+    }
+    for (let t = 1; t <= 7; t++) {
+        if (!tiers[t]) continue;
+        const mult = gameData.growth_multipliers[t] || 6;
+        shopHtml += `<div class="tier-section"><h5>Тир ${t} (x${mult} прироста)</h5><div class="creature-grid">`;
+        for (const c of tiers[t]) {
+            const maxCount = c.weekly_growth * mult;
+            const alreadyBought = state.army.find(s => s && s.creature_id === c.id);
+            const available = alreadyBought ? 0 : maxCount;
+            shopHtml += `<div class="creature-card" onclick="buyCreature('${c.id}', ${maxCount})"
+                style="${available <= 0 ? 'opacity:0.4;pointer-events:none' : ''}">
+                ${c.has_icon ? `<img src="/api/icon/creature_${c.id}" onerror="this.style.display='none'">` : ''}
+                <div class="info">
+                    <div class="name">${escapeHtml(c.name)}</div>
+                    <div class="details">HP:${c.health} Atk:${c.attack} Def:${c.defense} Dmg:${c.min_damage}-${c.max_damage}</div>
+                    <div class="cost">${c.gold_cost} \u{1F4B0} | Доступно: ${available}</div>
+                </div>
+            </div>`;
+        }
+        shopHtml += '</div></div>';
+    }
+    shopDiv.innerHTML = shopHtml;
+}
+
+function getUpgradeOptions(slot, idx) {
+    if (slot.upgrade) return '';
+    const creatures = gameData.creatures[myFaction] || [];
+    const upgrades = creatures.filter(c => c.tier === slot.tier && c.upgrade && c.id !== slot.creature_id);
+    if (!upgrades.length) return '';
+    return upgrades.map(u => {
+        const costDiff = (u.gold_cost - slot.gold_cost) * slot.count;
+        return `<button class="upgrade-btn" onclick="upgradeCreature(${idx},'${u.id}',${costDiff})">
+            \u2B06 ${escapeHtml(u.name)} (+${costDiff.toLocaleString()}\u{1F4B0})</button>`;
+    }).join('');
+}
+
+function buyCreature(creatureId, maxCount) {
+    const emptySlot = state.army.findIndex(s => s === null);
+    if (emptySlot === -1) { alert('Нет свободных слотов!'); return; }
+    const creature = (gameData.creatures[myFaction] || []).find(c => c.id === creatureId);
+    if (!creature) return;
+    const maxAffordable = Math.floor(state.gold / creature.gold_cost);
+    const max = Math.min(maxCount, maxAffordable);
+    if (max <= 0) { alert('Недостаточно золота!'); return; }
+
+    showCountModal(creature.name, max, (count) => {
+        if (count <= 0 || count > max) return;
+        const cost = creature.gold_cost * count;
+        state.gold -= cost;
+        state.army[emptySlot] = {
+            creature_id: creature.id, name: creature.name, count,
+            gold_cost: creature.gold_cost, has_icon: creature.has_icon,
+            tier: creature.tier, upgrade: creature.upgrade
+        };
+        renderArmy();
+        updateUI();
+    });
+}
+
+function removeArmy(idx) {
+    const slot = state.army[idx];
+    if (slot) {
+        state.gold += slot.gold_cost * slot.count;
+        state.army[idx] = null;
+    }
+    renderArmy();
+    updateUI();
+}
+
+function upgradeCreature(idx, newId, costDiff) {
+    if (state.gold < costDiff) { alert('Недостаточно золота!'); return; }
+    const creature = (gameData.creatures[myFaction] || []).find(c => c.id === newId);
+    if (!creature) return;
+    state.gold -= costDiff;
+    const old = state.army[idx];
+    state.army[idx] = {
+        creature_id: creature.id, name: creature.name, count: old.count,
+        gold_cost: creature.gold_cost, has_icon: creature.has_icon,
+        tier: creature.tier, upgrade: creature.upgrade
+    };
+    renderArmy();
+    updateUI();
+}
+
+function showCountModal(name, max, callback) {
+    const modal = document.createElement('div');
+    modal.className = 'count-modal';
+    modal.innerHTML = `<div class="count-modal-content">
+        <h4>${escapeHtml(name)}</h4>
+        <p>Максимум: ${max}</p>
+        <input type="number" id="count-input" min="1" max="${max}" value="${max}">
+        <div class="modal-buttons">
+            <button onclick="this.closest('.count-modal').remove()" style="background:#e94560;color:white">Отмена</button>
+            <button id="count-confirm" style="background:#27ae60;color:white">Купить</button>
+        </div>
+    </div>`;
+    document.body.appendChild(modal);
+    document.getElementById('count-confirm').onclick = () => {
+        const count = parseInt(document.getElementById('count-input').value) || 0;
+        modal.remove();
+        callback(count);
+    };
+}
+
+// ---- ARTIFACTS ----
+function generateArtifactShop() {
+    const arts = gameData.artifacts || [];
+    const minor = arts.filter(a => a.type === 'ARTF_CLASS_MINOR');
+    const major = arts.filter(a => a.type === 'ARTF_CLASS_MAJOR');
+    const relic = arts.filter(a => a.type === 'ARTF_CLASS_RELIC');
+    shuffle(minor); shuffle(major); shuffle(relic);
+    state.artifactShop = [
+        ...minor.slice(0, 6),
+        ...major.slice(0, 4),
+        ...relic.slice(0, 2),
+    ];
+}
+
+function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+}
+
+function renderArtifacts() {
+    const SLOT_NAMES = {
+        'HEAD': 'Голова', 'NECK': 'Шея', 'CHEST': 'Тело', 'SHOULDERS': 'Плечи',
+        'FEET': 'Ноги', 'FINGER': 'Кольцо', 'PRIMARY': 'Оружие', 'SECONDARY': 'Щит',
+        'MISCSLOT1': 'Разное', 'INVENTORY': 'Инвентарь',
+    };
+
+    // Equipped
+    const equippedDiv = document.getElementById('equipped-artifacts');
+    let eqHtml = '';
+    for (const [slot, name] of Object.entries(SLOT_NAMES)) {
+        const artId = state.equippedSlots[slot];
+        const art = artId ? (gameData.artifacts || []).find(a => a.id === artId) : null;
+        eqHtml += `<div class="equipped-slot">
+            <div class="slot-name">${name}</div>
+            ${art ? `
+                ${art.has_icon ? `<img src="/api/icon/artifact_${art.id}" onerror="this.style.display='none'">` : ''}
+                <div class="art-name">${escapeHtml(art.name)}</div>
+                <button class="remove-btn" onclick="removeArtifact('${slot}')">x</button>
+            ` : '<div style="color:#555;margin-top:20px">-</div>'}
+        </div>`;
+    }
+    equippedDiv.innerHTML = eqHtml;
+
+    // Shop
+    const shopDiv = document.getElementById('artifact-shop');
+    let shopHtml = '';
+    const groups = [
+        { title: 'Minor', items: state.artifactShop.filter(a => a.type === 'ARTF_CLASS_MINOR'), cls: 'minor' },
+        { title: 'Major', items: state.artifactShop.filter(a => a.type === 'ARTF_CLASS_MAJOR'), cls: 'major' },
+        { title: 'Relic', items: state.artifactShop.filter(a => a.type === 'ARTF_CLASS_RELIC'), cls: 'relic' },
+    ];
+    for (const g of groups) {
+        shopHtml += `<h4>${g.title}</h4><div class="artifact-grid">`;
+        for (const a of g.items) {
+            const bought = state.artifacts.includes(a.id);
+            const slotFull = state.equippedSlots[a.slot] && !bought;
+            shopHtml += `<div class="artifact-card ${g.cls}" onclick="buyArtifact('${a.id}')"
+                style="${bought || slotFull ? 'opacity:0.4;pointer-events:none' : ''}">
+                <div class="art-header">
+                    ${a.has_icon ? `<img src="/api/icon/artifact_${a.id}" onerror="this.style.display='none'">` : ''}
+                    <div>
+                        <div class="name">${escapeHtml(a.name)}</div>
+                        <div class="slot-type">${SLOT_NAMES[a.slot] || a.slot}</div>
+                    </div>
+                </div>
+                <div class="cost">${a.cost.toLocaleString()} \u{1F4B0}</div>
+                <div class="description">${escapeHtml(a.description || '')}</div>
+            </div>`;
+        }
+        shopHtml += '</div>';
+    }
+    shopDiv.innerHTML = shopHtml;
+}
+
+function buyArtifact(artId) {
+    const art = (gameData.artifacts || []).find(a => a.id === artId);
+    if (!art) return;
+    if (state.gold < art.cost) { alert('Недостаточно золота!'); return; }
+    if (state.equippedSlots[art.slot]) { alert('Слот занят!'); return; }
+    state.gold -= art.cost;
+    state.artifacts.push(art.id);
+    state.equippedSlots[art.slot] = art.id;
+    renderArtifacts();
+    updateUI();
+}
+
+function removeArtifact(slot) {
+    const artId = state.equippedSlots[slot];
+    if (!artId) return;
+    const art = (gameData.artifacts || []).find(a => a.id === artId);
+    if (art) state.gold += art.cost;
+    state.artifacts = state.artifacts.filter(a => a !== artId);
+    delete state.equippedSlots[slot];
+    renderArtifacts();
+    updateUI();
+}
+
+// ---- SPELLS ----
+function generateGuildSpells() {
+    const factionSchools = gameData.faction_schools[myFaction] || [];
+    const allSpells = gameData.spells || [];
+    const guild = {};
+
+    if (myFaction === 'Orcs') {
+        // Orcs get war cries only
+        for (let floor = 1; floor <= 5; floor++) {
+            const cries = allSpells.filter(s => s.school === 'MAGIC_SCHOOL_WARCRIES' && s.level === floor);
+            guild[floor] = cries;
+        }
+    } else {
+        const isAcademy = myFaction === 'Academy';
+        const isDwarf = myFaction === 'Dwarf';
+        const nativeSpells = allSpells.filter(s => factionSchools.includes(s.school));
+        const foreignSchools = ['MAGIC_SCHOOL_LIGHT', 'MAGIC_SCHOOL_DARK', 'MAGIC_SCHOOL_DESTRUCTIVE', 'MAGIC_SCHOOL_SUMMONING']
+            .filter(s => !factionSchools.includes(s));
+        const foreignSpells = allSpells.filter(s => foreignSchools.includes(s.school));
+
+        for (let floor = 1; floor <= 5; floor++) {
+            const floorSpells = [];
+            const nativeFloor = nativeSpells.filter(s => s.level === floor);
+            shuffle(nativeFloor);
+            floorSpells.push(...nativeFloor.slice(0, 2));
+
+            if (floor <= 3 || isAcademy) {
+                const foreignFloor = foreignSpells.filter(s => s.level === floor);
+                shuffle(foreignFloor);
+                const foreignCount = isAcademy ? 2 : 1;
+                floorSpells.push(...foreignFloor.slice(0, foreignCount));
+            }
+
+            // Dwarves bonus: add runes
+            if (isDwarf) {
+                const runes = allSpells.filter(s => s.school === 'MAGIC_SCHOOL_RUNIC' && s.level === floor);
+                floorSpells.push(...runes);
+            }
+
+            guild[floor] = floorSpells;
+        }
+    }
+    state.guildSpells = guild;
+}
+
+function renderSpells() {
+    if (myFaction === 'Orcs') {
+        document.getElementById('spells-title').textContent = 'Кличи';
+    } else if (myFaction === 'Dwarf') {
+        document.getElementById('spells-title').textContent = 'Гильдия магов + Руны';
+    } else {
+        document.getElementById('spells-title').textContent = 'Гильдия магов';
+    }
+
+    const floorsDiv = document.getElementById('spell-floors');
+    let html = '';
+    for (let floor = 1; floor <= 5; floor++) {
+        const spells = state.guildSpells[floor] || [];
+        if (!spells.length) continue;
+        html += `<div class="spell-floor"><h4>Круг ${floor}</h4><div class="spell-grid">`;
+        for (const s of spells) {
+            const learned = state.spells.includes(s.id);
+            html += `<div class="spell-card ${learned ? 'learned' : ''}" onclick="toggleSpell('${s.id}')">
+                ${s.has_icon ? `<img src="/api/icon/spell_${s.id}" onerror="this.style.display='none'">` : ''}
+                <div class="name">${escapeHtml(s.name)}</div>
+                <div class="school">${getSchoolName(s.school)}</div>
+                <div class="mana">\u{1F4A7} ${s.mana_cost}</div>
+            </div>`;
+        }
+        html += '</div></div>';
+    }
+    floorsDiv.innerHTML = html;
+
+    // Learned spells list
+    const learnedDiv = document.getElementById('learned-spells-list');
+    learnedDiv.innerHTML = state.spells.map(sid => {
+        const s = (gameData.spells || []).find(sp => sp.id === sid);
+        return `<span class="learned-spell-tag">${escapeHtml(s ? s.name : sid)}</span>`;
+    }).join('');
+}
+
+function getSchoolName(school) {
+    const names = {
+        'MAGIC_SCHOOL_LIGHT': 'Свет', 'MAGIC_SCHOOL_DARK': 'Тьма',
+        'MAGIC_SCHOOL_DESTRUCTIVE': 'Хаос', 'MAGIC_SCHOOL_SUMMONING': 'Призыв',
+        'MAGIC_SCHOOL_RUNIC': 'Руны', 'MAGIC_SCHOOL_WARCRIES': 'Кличи',
+    };
+    return names[school] || school;
+}
+
+function toggleSpell(spellId) {
+    if (state.spells.includes(spellId)) {
+        state.spells = state.spells.filter(s => s !== spellId);
+    } else {
+        state.spells.push(spellId);
+    }
+    renderSpells();
+}
+
+// ---- READY ----
+function playerReady() {
+    const expTable = gameData.exp_table || {};
+    const experience = expTable[String(state.level)] || 0;
+
+    const build = {
+        hero: {
+            name: state.hero ? state.hero.name : 'Hero',
+            shared_href: state.hero ? state.hero.shared_href : '',
         },
-        player2: {
-            name: "Игрок 2",
-            hero: { level: 1, attack: 0, defense: 0, spellpower: 0, knowledge: 0 },
-            army: [null, null, null, null, null, null, null]
-        }
+        stats: state.stats,
+        experience: experience,
+        army: state.army.filter(s => s).map(s => ({
+            creature_id: s.creature_id, count: s.count
+        })),
+        artifacts: state.artifacts,
+        skills: state.skills.map(s => ({
+            skill_id: s.skill_id, mastery: s.mastery,
+            is_class_skill: s.skill_id === getClassSkillId(),
+        })),
+        perks: state.perks,
+        spells: state.spells,
+        ballista: false,
+        first_aid_tent: false,
+        ammo_cart: false,
     };
-    applyPresetState(presetState);
+
+    if (isOffline) {
+        // For offline mode, auto-fill P2
+        socket.emit('player_ready', {
+            room_id: roomId, build: build, player_num: 1,
+            build_p2: generateAutoP2Build(),
+        });
+    } else {
+        socket.emit('player_ready', { room_id: roomId, build: build });
+    }
+
+    document.getElementById('ready-btn').disabled = true;
+    document.getElementById('ready-btn').textContent = 'Ожидание...';
+}
+
+function generateAutoP2Build() {
+    return {
+        hero: { name: 'AI Player', shared_href: '' },
+        stats: { offence: 5, defence: 5, spellpower: 5, knowledge: 5 },
+        experience: 81961,
+        army: [], artifacts: [], skills: [], perks: [], spells: [],
+        ballista: false, first_aid_tent: false, ammo_cart: false,
+    };
+}
+
+function autoFillP2() {
+    closeP2Modal();
+}
+
+function closeP2Modal() {
+    document.getElementById('offline-p2-modal').style.display = 'none';
 }

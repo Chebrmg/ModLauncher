@@ -3,205 +3,154 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Heroes 5 — Редактор Дуэль-Пресетов</title>
+    <title>Heroes 5 — Duel Builder</title>
     <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.4/socket.io.min.js"></script>
 </head>
 <body>
     <div id="app">
-        <header>
-            <h1>⚔️ Heroes 5 — Редактор Дуэль-Пресетов</h1>
-            <div class="header-controls">
-                <button onclick="savePreset()" class="btn btn-save">💾 Сохранить</button>
-                <button onclick="showLoadDialog()" class="btn btn-load">📂 Загрузить</button>
-                <button onclick="exportPreset()" class="btn btn-export">📤 Экспорт</button>
-                <button onclick="importPreset()" class="btn btn-import">📥 Импорт</button>
-                <button onclick="resetPreset()" class="btn btn-reset">🔄 Сброс</button>
+        <!-- LOBBY SCREEN -->
+        <div id="lobby-screen" class="screen active">
+            <h1>⚔️ Heroes V — Duel Builder</h1>
+            <div class="lobby-buttons">
+                <button onclick="createRoom()">Создать комнату</button>
+                <button onclick="refreshRooms()">Обновить список</button>
+                <button onclick="startOffline()">Офлайн (тест)</button>
             </div>
-        </header>
+            <div id="room-name-input" style="display:none;">
+                <input type="text" id="room-name" placeholder="Название комнаты" value="">
+                <button onclick="confirmCreateRoom()">Создать</button>
+            </div>
+            <div id="rooms-list"></div>
+            <div id="lobby-status"></div>
+        </div>
 
-        <main class="duel-layout">
-            <!-- Player 1 -->
-            <section class="player-panel" id="player1-panel">
-                <div class="player-header player1-header">
-                    <h2>Игрок 1</h2>
-                    <input type="text" id="player1-name" placeholder="Имя игрока" value="Игрок 1" class="player-name-input">
+        <!-- WAITING SCREEN -->
+        <div id="waiting-screen" class="screen">
+            <h2 id="waiting-title">Ожидание второго игрока...</h2>
+            <p id="waiting-info"></p>
+        </div>
+
+        <!-- BUILDER SCREEN -->
+        <div id="builder-screen" class="screen">
+            <div class="builder-header">
+                <div class="player-info">
+                    <span id="player-faction" class="faction-badge"></span>
+                    <span id="player-gold" class="gold-display">💰 120,000</span>
+                    <span id="player-level" class="level-display">Ур. 1</span>
                 </div>
-
-                <div class="hero-section">
-                    <h3>Герой</h3>
-                    <div class="hero-config">
-                        <div class="hero-level">
-                            <label>Уровень:</label>
-                            <input type="number" id="player1-hero-level" min="1" max="50" value="1"
-                                   onchange="updateHeroStats(1)">
-                        </div>
-                        <div class="primary-stats">
-                            <div class="stat-row">
-                                <label>Атака:</label>
-                                <input type="number" id="player1-hero-attack" min="0" max="99" value="0">
-                            </div>
-                            <div class="stat-row">
-                                <label>Защита:</label>
-                                <input type="number" id="player1-hero-defense" min="0" max="99" value="0">
-                            </div>
-                            <div class="stat-row">
-                                <label>Сила магии:</label>
-                                <input type="number" id="player1-hero-spellpower" min="0" max="99" value="0">
-                            </div>
-                            <div class="stat-row">
-                                <label>Знание:</label>
-                                <input type="number" id="player1-hero-knowledge" min="0" max="99" value="0">
-                            </div>
-                        </div>
-                    </div>
+                <div class="player-stats" id="player-stats"></div>
+                <div class="builder-tabs">
+                    <button class="tab-btn active" data-tab="leveling">Прокачка</button>
+                    <button class="tab-btn" data-tab="army">Армия</button>
+                    <button class="tab-btn" data-tab="artifacts">Артефакты</button>
+                    <button class="tab-btn" data-tab="spells">Заклинания</button>
                 </div>
-
-                <div class="army-section">
-                    <h3>Армия</h3>
-                    <div class="faction-selector">
-                        <label>Фракция:</label>
-                        <select id="player1-faction" onchange="loadCreatures(1)">
-                            <option value="">— Выберите фракцию —</option>
-                        </select>
-                    </div>
-                    <div class="army-slots" id="player1-army">
-                        <div class="army-slot" data-player="1" data-slot="0" onclick="openCreatureSelector(1, 0)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="1" data-slot="1" onclick="openCreatureSelector(1, 1)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="1" data-slot="2" onclick="openCreatureSelector(1, 2)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="1" data-slot="3" onclick="openCreatureSelector(1, 3)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="1" data-slot="4" onclick="openCreatureSelector(1, 4)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="1" data-slot="5" onclick="openCreatureSelector(1, 5)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="1" data-slot="6" onclick="openCreatureSelector(1, 6)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                    </div>
-                    <div class="army-power" id="player1-power">Сила армии: 0</div>
-                </div>
-            </section>
-
-            <!-- VS divider -->
-            <div class="vs-divider">
-                <span>VS</span>
+                <button id="ready-btn" class="ready-btn" onclick="playerReady()">Готов</button>
             </div>
 
-            <!-- Player 2 -->
-            <section class="player-panel" id="player2-panel">
-                <div class="player-header player2-header">
-                    <h2>Игрок 2</h2>
-                    <input type="text" id="player2-name" placeholder="Имя игрока" value="Игрок 2" class="player-name-input">
-                </div>
-
-                <div class="hero-section">
-                    <h3>Герой</h3>
-                    <div class="hero-config">
-                        <div class="hero-level">
-                            <label>Уровень:</label>
-                            <input type="number" id="player2-hero-level" min="1" max="50" value="1"
-                                   onchange="updateHeroStats(2)">
+            <!-- LEVELING TAB -->
+            <div id="tab-leveling" class="tab-content active">
+                <div class="leveling-container">
+                    <div class="level-info">
+                        <h3>Уровень <span id="current-level">1</span> / 20</h3>
+                        <p id="stat-gained"></p>
+                    </div>
+                    <div class="levelup-slots" id="levelup-slots">
+                        <div class="levelup-row">
+                            <div class="levelup-slot" id="slot-tl" onclick="chooseLevelOption('tl')">
+                                <div class="slot-label">Новый навык</div>
+                                <div class="slot-content" id="slot-tl-content"></div>
+                            </div>
+                            <div class="levelup-slot" id="slot-tr" onclick="chooseLevelOption('tr')">
+                                <div class="slot-label">Перк (первичный)</div>
+                                <div class="slot-content" id="slot-tr-content"></div>
+                            </div>
                         </div>
-                        <div class="primary-stats">
-                            <div class="stat-row">
-                                <label>Атака:</label>
-                                <input type="number" id="player2-hero-attack" min="0" max="99" value="0">
+                        <div class="levelup-row">
+                            <div class="levelup-slot" id="slot-bl" onclick="chooseLevelOption('bl')">
+                                <div class="slot-label">Продвижение навыка</div>
+                                <div class="slot-content" id="slot-bl-content"></div>
                             </div>
-                            <div class="stat-row">
-                                <label>Защита:</label>
-                                <input type="number" id="player2-hero-defense" min="0" max="99" value="0">
-                            </div>
-                            <div class="stat-row">
-                                <label>Сила магии:</label>
-                                <input type="number" id="player2-hero-spellpower" min="0" max="99" value="0">
-                            </div>
-                            <div class="stat-row">
-                                <label>Знание:</label>
-                                <input type="number" id="player2-hero-knowledge" min="0" max="99" value="0">
+                            <div class="levelup-slot" id="slot-br" onclick="chooseLevelOption('br')">
+                                <div class="slot-label">Перк (вторичный)</div>
+                                <div class="slot-content" id="slot-br-content"></div>
                             </div>
                         </div>
                     </div>
+                    <div class="current-skills" id="current-skills">
+                        <h4>Текущие навыки и перки:</h4>
+                        <div id="skills-list"></div>
+                    </div>
+                    <div class="post-leveling" id="post-leveling" style="display:none;">
+                        <h4>Дополнительно:</h4>
+                        <button id="buy-level-btn" onclick="buyExtraLevel()">Купить уровень (<span id="buy-level-cost">8000</span>💰)</button>
+                        <button id="buy-stats-btn" onclick="showBuyStats()">+2 к стату (5000💰)</button>
+                    </div>
                 </div>
+            </div>
 
-                <div class="army-section">
+            <!-- ARMY TAB -->
+            <div id="tab-army" class="tab-content">
+                <div class="army-container">
                     <h3>Армия</h3>
-                    <div class="faction-selector">
-                        <label>Фракция:</label>
-                        <select id="player2-faction" onchange="loadCreatures(2)">
-                            <option value="">— Выберите фракцию —</option>
-                        </select>
-                    </div>
-                    <div class="army-slots" id="player2-army">
-                        <div class="army-slot" data-player="2" data-slot="0" onclick="openCreatureSelector(2, 0)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="2" data-slot="1" onclick="openCreatureSelector(2, 1)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="2" data-slot="2" onclick="openCreatureSelector(2, 2)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="2" data-slot="3" onclick="openCreatureSelector(2, 3)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="2" data-slot="4" onclick="openCreatureSelector(2, 4)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="2" data-slot="5" onclick="openCreatureSelector(2, 5)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                        <div class="army-slot" data-player="2" data-slot="6" onclick="openCreatureSelector(2, 6)">
-                            <div class="slot-empty">+</div>
-                        </div>
-                    </div>
-                    <div class="army-power" id="player2-power">Сила армии: 0</div>
+                    <div class="army-slots" id="army-slots"></div>
+                    <div class="creature-shop" id="creature-shop"></div>
                 </div>
-            </section>
-        </main>
+            </div>
+
+            <!-- ARTIFACTS TAB -->
+            <div id="tab-artifacts" class="tab-content">
+                <div class="artifacts-container">
+                    <h3>Артефакты</h3>
+                    <div class="equipped-artifacts" id="equipped-artifacts"></div>
+                    <div class="artifact-shop" id="artifact-shop"></div>
+                </div>
+            </div>
+
+            <!-- SPELLS TAB -->
+            <div id="tab-spells" class="tab-content">
+                <div class="spells-container">
+                    <h3 id="spells-title">Гильдия магов</h3>
+                    <div class="spell-floors" id="spell-floors"></div>
+                    <div class="learned-spells">
+                        <h4>Изученные заклинания:</h4>
+                        <div id="learned-spells-list"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- DONE SCREEN -->
+        <div id="done-screen" class="screen">
+            <h2>✅ Пресет сгенерирован!</h2>
+            <p id="done-message"></p>
+        </div>
     </div>
 
-    <!-- Creature Selector Modal -->
-    <div id="creature-modal" class="modal" style="display:none;">
+    <!-- OFFLINE P2 MODAL -->
+    <div id="offline-p2-modal" class="modal" style="display:none;">
+        <div class="modal-content modal-wide">
+            <h2>Игрок 2 — <span id="p2-faction"></span></h2>
+            <p>В офлайн режиме: настройте билд второго игрока вручную или используйте автозаполнение</p>
+            <button onclick="autoFillP2()">Автозаполнение (случайный билд)</button>
+            <button onclick="closeP2Modal()">Пропустить (пустой билд)</button>
+        </div>
+    </div>
+
+    <!-- BUY STATS MODAL -->
+    <div id="buy-stats-modal" class="modal" style="display:none;">
         <div class="modal-content">
-            <div class="modal-header">
-                <h2>Выбор существа</h2>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
+            <h3>Выберите стат (+2)</h3>
+            <div class="stats-choice">
+                <button onclick="buyStats('offence')">Нападение +2</button>
+                <button onclick="buyStats('defence')">Защита +2</button>
+                <button onclick="buyStats('spellpower')">Сила магии +2</button>
+                <button onclick="buyStats('knowledge')">Знание +2</button>
             </div>
-            <div class="modal-tabs" id="modal-faction-tabs"></div>
-            <div class="creature-search">
-                <input type="text" id="creature-search-input" placeholder="Поиск по имени..."
-                       oninput="filterCreatures()">
-            </div>
-            <div class="creature-grid" id="creature-grid"></div>
+            <button onclick="closeBuyStats()">Отмена</button>
         </div>
     </div>
-
-    <!-- Creature Detail Tooltip -->
-    <div id="creature-tooltip" class="tooltip" style="display:none;"></div>
-
-    <!-- Save/Load Dialog -->
-    <div id="save-dialog" class="modal" style="display:none;">
-        <div class="modal-content modal-small">
-            <div class="modal-header">
-                <h2 id="save-dialog-title">Сохранить пресет</h2>
-                <button class="modal-close" onclick="closeSaveDialog()">&times;</button>
-            </div>
-            <div id="save-dialog-body"></div>
-        </div>
-    </div>
-
-    <!-- Hidden file input for import -->
-    <input type="file" id="import-file-input" accept=".json" style="display:none;"
-           onchange="handleImport(event)">
 
     <script src="/static/js/app.js"></script>
 </body>
