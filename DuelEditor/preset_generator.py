@@ -118,18 +118,21 @@ def generate_hero_xdb(player: dict) -> str:
 </AdvMapHero>"""
 
 
-def generate_presets_xdb(my_hero_path: str, my_name: str) -> str:
-    """Generate presets.(DuelPresets).xdb with only the local player's hero."""
-    return f"""<?xml version="1.0" encoding="UTF-8"?>
-<DuelPresets ObjectRecordID="1000001">
-        <presets>
+def generate_presets_xdb(hero_paths: list[str]) -> str:
+    """Generate presets.(DuelPresets).xdb with both heroes visible."""
+    items_xml = ""
+    for path in hero_paths:
+        items_xml += f"""
                 <Item>
                         <PresetNameFileRef href="/Text/PresetNames/CustomPreset.txt"/>
                         <LeftFace href=""/>
                         <RightFace href=""/>
                         <RoundedFace href=""/>
-                        <PresetHero href="{my_hero_path}#xpointer(/AdvMapHero)"/>
-                </Item>
+                        <PresetHero href="{path}#xpointer(/AdvMapHero)"/>
+                </Item>"""
+    return f"""<?xml version="1.0" encoding="UTF-8"?>
+<DuelPresets ObjectRecordID="1000001">
+        <presets>{items_xml}
         </presets>
 </DuelPresets>"""
 
@@ -196,16 +199,9 @@ MAP_TAG_XDB = """<?xml version="1.0" encoding="UTF-8"?>
 GROUND_TERRAIN_SIZE = 72 * 72 * 4
 
 
-def generate_h5u(player1: dict, player2: dict, for_player: int,
+def generate_h5u(player1: dict, player2: dict,
                  template_terrain: bytes = None) -> bytes:
-    """Generate a .h5u duel preset file.
-
-    Args:
-        player1: Player 1 build data
-        player2: Player 2 build data
-        for_player: 1 or 2 — determines which hero appears in UI presets
-        template_terrain: Optional terrain binary data from a template preset
-    """
+    """Generate an identical .h5u duel preset file with both heroes in UI."""
     buf = io.BytesIO()
 
     p1_dir = "Maps/DuelMode/Heroes/player1"
@@ -220,11 +216,7 @@ def generate_h5u(player1: dict, player2: dict, for_player: int,
     p1_name = player1.get("hero", {}).get("name", "Player 1")
     p2_name = player2.get("hero", {}).get("name", "Player 2")
 
-    if for_player == 1:
-        presets_xdb = generate_presets_xdb(p1_path, p1_name)
-    else:
-        presets_xdb = generate_presets_xdb(p2_path, p2_name)
-
+    presets_xdb = generate_presets_xdb([p1_path, p2_path])
     map_xdb = generate_map_xdb([p1_path, p2_path])
 
     terrain = template_terrain or (b"\x00" * GROUND_TERRAIN_SIZE)

@@ -70,8 +70,10 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 .mastery-expert { background: #4a0000; color: #ff6b6b; }
 
 .current-skills h4 { color: #ffd700; margin-bottom: 10px; }
+.current-skills h4 small { color: #888; font-weight: normal; }
 #skills-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.skill-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; background: #16213e; font-size: 0.85em; }
+.skill-tag { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 8px; background: #16213e; font-size: 0.85em; cursor: pointer; }
+.skill-tag:hover { background: #1a2744; }
 .skill-tag img { width: 24px; height: 24px; border-radius: 4px; }
 .perk-tag { background: #1a2744; border: 1px solid #333; }
 
@@ -83,6 +85,7 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 
 /* Army */
 .army-container { max-width: 1000px; margin: 0 auto; }
+.army-container h3 small { color: #888; font-weight: normal; }
 .army-slots { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
 .army-slot { width: 130px; min-height: 160px; padding: 10px; background: #16213e; border: 2px solid #333; border-radius: 10px; text-align: center; position: relative; }
 .army-slot.filled { border-color: #e94560; }
@@ -99,7 +102,6 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 .creature-card img { width: 48px; height: 48px; border-radius: 6px; }
 .creature-card .info { flex: 1; }
 .creature-card .info .name { font-size: 0.9em; color: #ffd700; }
-.creature-card .info .details { font-size: 0.75em; color: #aaa; }
 .creature-card .info .cost { font-size: 0.85em; color: #e94560; }
 
 /* Count input modal */
@@ -112,12 +114,17 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 
 /* Artifacts */
 .artifacts-container { max-width: 1000px; margin: 0 auto; }
-.equipped-artifacts { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
+.artifacts-container h3 small { color: #888; font-weight: normal; }
+.equipped-artifacts { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
 .equipped-slot { width: 100px; min-height: 120px; padding: 8px; background: #16213e; border: 2px solid #333; border-radius: 10px; text-align: center; position: relative; }
 .equipped-slot .slot-name { font-size: 0.7em; color: #888; margin-bottom: 5px; }
 .equipped-slot img { width: 48px; height: 48px; border-radius: 6px; }
 .equipped-slot .art-name { font-size: 0.7em; color: #ffd700; margin-top: 4px; }
 .equipped-slot .remove-btn { position: absolute; top: 3px; right: 3px; background: #e94560; color: white; border: none; border-radius: 50%; width: 18px; height: 18px; cursor: pointer; font-size: 0.65em; line-height: 18px; }
+
+/* Reroll button */
+.reroll-btn { padding: 8px 20px; background: #533483; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 0.95em; margin-bottom: 15px; }
+.reroll-btn:hover { background: #6c45a0; }
 
 .artifact-shop h4 { color: #ffd700; margin: 15px 0 10px; }
 .artifact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
@@ -131,7 +138,6 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 .artifact-card .name { font-size: 0.9em; color: #ffd700; }
 .artifact-card .slot-type { font-size: 0.75em; color: #888; }
 .artifact-card .cost { font-size: 0.85em; color: #e94560; margin-top: 4px; }
-.artifact-card .description { font-size: 0.75em; color: #aaa; margin-top: 4px; max-height: 40px; overflow: hidden; }
 
 /* Spells */
 .spells-container { max-width: 1000px; margin: 0 auto; }
@@ -159,15 +165,26 @@ body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #1a1a2e; color: 
 .stats-choice button { padding: 10px 20px; background: #0f3460; color: #e0e0e0; border: 1px solid #333; border-radius: 8px; cursor: pointer; font-size: 1em; }
 .stats-choice button:hover { background: #533483; }
 
+/* Description Modal (Fix 2.1 / Fix 7 / Fix 8) */
+.description-modal { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 400; }
+.desc-modal-content { background: #16213e; border: 1px solid #ffd700; border-radius: 12px; min-width: 350px; max-width: 600px; max-height: 80vh; overflow-y: auto; }
+.desc-modal-header { display: flex; justify-content: space-between; align-items: center; padding: 15px 20px; border-bottom: 1px solid #333; }
+.desc-modal-header h3 { color: #ffd700; margin: 0; }
+.desc-close-btn { background: #e94560; color: white; border: none; border-radius: 50%; width: 28px; height: 28px; cursor: pointer; font-size: 1.2em; line-height: 28px; }
+.desc-modal-body { padding: 15px 20px; color: #ccc; font-size: 0.95em; line-height: 1.5; white-space: pre-wrap; }
+
+/* Creature stats grid in modal */
+.creature-stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 15px; }
+.creature-stats-grid div { padding: 4px 0; }
+.creature-abilities { margin-top: 10px; }
+.ability-tag { display: inline-block; padding: 3px 8px; background: #0f3460; border-radius: 4px; font-size: 0.85em; margin: 2px; }
+
 /* Done */
 #done-screen { text-align: center; padding-top: 100px; }
 #done-screen h2 { color: #27ae60; font-size: 2em; }
 #done-message { color: #aaa; margin-top: 15px; font-size: 1.1em; }
-
-/* Tooltip */
-.tooltip { position: absolute; background: #0f3460; border: 1px solid #ffd700; border-radius: 8px; padding: 12px; max-width: 300px; z-index: 500; font-size: 0.85em; pointer-events: none; }
-.tooltip .tt-name { color: #ffd700; font-weight: bold; margin-bottom: 5px; }
-.tooltip .tt-stats { color: #aaa; }
+.download-btn { display: inline-block; padding: 12px 30px; background: #27ae60; color: white; text-decoration: none; border-radius: 8px; font-size: 1.1em; margin-top: 10px; }
+.download-btn:hover { background: #2ecc71; }
 
 /* Tier labels */
 .tier-section { margin-bottom: 15px; }

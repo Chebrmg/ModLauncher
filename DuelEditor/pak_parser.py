@@ -63,6 +63,9 @@ class SpellData:
     school: str = ""
     mana_cost: int = 0
     icon_path: str = ""
+    is_mass: bool = False
+    is_empowered: bool = False
+    trained_cost: int = 0
 
 
 @dataclass
@@ -316,15 +319,29 @@ class MultiPakParser:
             return None
         dds_data = self._read_file(icon_path)
         if dds_data is None:
-            return None
+            # Try adding .dds extension if missing
+            if not icon_path.lower().endswith(".dds"):
+                dds_data = self._read_file(icon_path + ".dds")
+            if dds_data is None:
+                return None
         if Image is None:
             return None
         try:
             img = Image.open(io.BytesIO(dds_data))
+            img = img.convert("RGBA")
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             return buf.getvalue()
         except Exception:
+            # Try raw DDS header parsing as fallback
+            try:
+                if dds_data[:4] == b"DDS ":
+                    img = Image.open(io.BytesIO(dds_data))
+                    buf = io.BytesIO()
+                    img.save(buf, format="PNG")
+                    return buf.getvalue()
+            except Exception:
+                pass
             return None
 
     # ---- Creatures ----
@@ -483,6 +500,12 @@ class MultiPakParser:
                     icon_xdb = self._resolve_href(href)
                     if icon_xdb:
                         spell.icon_path = self._resolve_icon_dds(icon_xdb)
+            spell.trained_cost = spell.mana_cost
+            # Detect MASS/EMPOWERED spells by spell ID or name
+            upper_sid = sid.upper()
+            upper_name = (spell.name or "").upper()
+            spell.is_mass = "MASS_" in upper_sid or "MASS " in upper_name
+            spell.is_empowered = "EMPOWERED" in upper_sid or "EMPOWERED" in upper_name
             if not spell.name:
                 spell.name = sid.replace("SPELL_", "").replace("_", " ").title()
             self.spells[sid] = spell

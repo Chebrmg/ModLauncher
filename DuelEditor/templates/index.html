@@ -11,7 +11,7 @@
     <div id="app">
         <!-- LOBBY SCREEN -->
         <div id="lobby-screen" class="screen active">
-            <h1>⚔️ Heroes V — Duel Builder</h1>
+            <h1>Heroes V — Duel Builder</h1>
             <div class="lobby-buttons">
                 <button onclick="createRoom()">Создать комнату</button>
                 <button onclick="refreshRooms()">Обновить список</button>
@@ -36,7 +36,7 @@
             <div class="builder-header">
                 <div class="player-info">
                     <span id="player-faction" class="faction-badge"></span>
-                    <span id="player-gold" class="gold-display">💰 120,000</span>
+                    <span id="player-gold" class="gold-display">120,000</span>
                     <span id="player-level" class="level-display">Ур. 1</span>
                 </div>
                 <div class="player-stats" id="player-stats"></div>
@@ -79,13 +79,13 @@
                         </div>
                     </div>
                     <div class="current-skills" id="current-skills">
-                        <h4>Текущие навыки и перки:</h4>
+                        <h4>Текущие навыки и перки: <small>(ПКМ для описания)</small></h4>
                         <div id="skills-list"></div>
                     </div>
                     <div class="post-leveling" id="post-leveling" style="display:none;">
                         <h4>Дополнительно:</h4>
-                        <button id="buy-level-btn" onclick="buyExtraLevel()">Купить уровень (<span id="buy-level-cost">8000</span>💰)</button>
-                        <button id="buy-stats-btn" onclick="showBuyStats()">+2 к стату (5000💰)</button>
+                        <button id="buy-level-btn" onclick="buyExtraLevel()">Купить уровень (<span id="buy-level-cost">8000</span>)</button>
+                        <button id="buy-stats-btn" onclick="showBuyStats()">+2 к стату (5000)</button>
                     </div>
                 </div>
             </div>
@@ -93,7 +93,7 @@
             <!-- ARMY TAB -->
             <div id="tab-army" class="tab-content">
                 <div class="army-container">
-                    <h3>Армия</h3>
+                    <h3>Армия <small>(ПКМ для статов юнита)</small></h3>
                     <div class="army-slots" id="army-slots"></div>
                     <div class="creature-shop" id="creature-shop"></div>
                 </div>
@@ -102,8 +102,9 @@
             <!-- ARTIFACTS TAB -->
             <div id="tab-artifacts" class="tab-content">
                 <div class="artifacts-container">
-                    <h3>Артефакты</h3>
+                    <h3>Артефакты <small>(ПКМ для описания)</small></h3>
                     <div class="equipped-artifacts" id="equipped-artifacts"></div>
+                    <div id="reroll-artifacts"></div>
                     <div class="artifact-shop" id="artifact-shop"></div>
                 </div>
             </div>
@@ -123,7 +124,7 @@
 
         <!-- DONE SCREEN -->
         <div id="done-screen" class="screen">
-            <h2>✅ Пресет сгенерирован!</h2>
+            <h2>Пресет сгенерирован!</h2>
             <p id="done-message"></p>
         </div>
     </div>

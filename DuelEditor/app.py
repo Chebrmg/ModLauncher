@@ -3,6 +3,7 @@
 Supports LAN multiplayer and offline mode.
 """
 
+import io
 import json
 import os
 import random
@@ -13,7 +14,7 @@ import struct
 import time
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, request, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_from_directory, send_file
 from flask_socketio import SocketIO, emit, join_room
 
 from pak_parser import MultiPakParser
@@ -78,6 +79,15 @@ def get_local_ip():
         return "127.0.0.1"
 
 
+def get_external_ip():
+    """Try to get external IP via public API, fallback to local IP."""
+    try:
+        import urllib.request
+        return urllib.request.urlopen("https://api.ipify.org", timeout=3).read().decode().strip()
+    except Exception:
+        return get_local_ip()
+
+
 # ---- UDP Discovery ----
 
 def start_udp_broadcast(room_name: str, port: int):
@@ -117,6 +127,22 @@ def api_icon(icon_name):
     return "", 404
 
 
+@app.route("/api/download-preset/<room_id>")
+def api_download_preset(room_id):
+    """Fix 13: Download preset file via browser."""
+    if room_id not in rooms:
+        return "Комната не найдена", 404
+    room = rooms[room_id]
+    if "preset_data" not in room:
+        return "Пресет ещё не сгенерирован", 404
+    return send_file(
+        io.BytesIO(room["preset_data"]),
+        as_attachment=True,
+        download_name=room.get("preset_filename", "DuelPreset.h5u"),
+        mimetype="application/octet-stream",
+    )
+
+
 @app.route("/api/game-data")
 def api_game_data():
     """Return all game data for the client."""
@@ -144,15 +170,21 @@ def api_game_data():
             "id": s.spell_id, "name": s.name, "description": s.description,
             "level": s.level, "school": s.school, "mana_cost": s.mana_cost,
             "has_icon": bool(s.icon_path),
+            "is_mass": s.is_mass, "is_empowered": s.is_empowered,
         })
 
     skills_list = []
     for s in parser.skills.values():
+        # Fix 1: Skip deleted perks (perks with empty BasicSkillID that aren't base skills)
+        if s.skill_type != "SKILLTYPE_SKILL" and not s.basic_skill_id:
+            continue
         skills_list.append({
             "id": s.skill_id, "name": s.name, "description": s.description,
             "skill_type": s.skill_type, "hero_class": s.hero_class,
             "basic_skill_id": s.basic_skill_id, "prerequisites": s.prerequisites,
             "levels": s.levels, "has_icon": bool(s.icon_path),
+            "descriptions_by_level": s.descriptions_by_level,
+            "names_by_level": s.names_by_level,
         })
 
     artifacts_list = []
@@ -222,9 +254,12 @@ def on_create_room(data):
         "state": "waiting",
     }
     join_room(room_id)
+    local_ip = get_local_ip()
+    external_ip = get_external_ip()
     emit("room_created", {
         "room_id": room_id, "name": room_name,
-        "player_num": 1, "ip": get_local_ip(), "port": 5000,
+        "player_num": 1,
+        "local_ip": local_ip, "external_ip": external_ip, "port": 5000,
     })
     start_udp_broadcast(room_name, 5000)
 
@@ -331,21 +366,27 @@ def _generate_preset(room_id: str):
         except Exception:
             pass
 
-    h5u_p1 = generate_h5u(p1_build, p2_build, for_player=1, template_terrain=terrain)
-    h5u_p2 = generate_h5u(p1_build, p2_build, for_player=2, template_terrain=terrain)
+    # Fix 10: Generate ONE identical file for both players
+    h5u_data = generate_h5u(p1_build, p2_build, template_terrain=terrain)
 
     # Save to UserMODs
     mods_dir = GAME_DIR / "UserMODs"
     mods_dir.mkdir(parents=True, exist_ok=True)
     preset_name = f"DuelPreset_{int(time.time())}"
-    (mods_dir / f"{preset_name}_p1.h5u").write_bytes(h5u_p1)
-    (mods_dir / f"{preset_name}_p2.h5u").write_bytes(h5u_p2)
+    preset_filename = f"{preset_name}.h5u"
+    (mods_dir / preset_filename).write_bytes(h5u_data)
 
+    # Store for download endpoint (Fix 13)
+    room["preset_data"] = h5u_data
+    room["preset_filename"] = preset_filename
     room["state"] = "done"
+
     socketio.emit("preset_generated", {
         "room_id": room_id,
         "preset_name": preset_name,
-        "message": f"Пресет сохранён в UserMODs/{preset_name}_p1.h5u и _p2.h5u",
+        "preset_filename": preset_filename,
+        "message": f"Пресет сохранён: UserMODs/{preset_filename}",
+        "download_url": f"/api/download-preset/{room_id}",
     }, room=room_id)
 
 
@@ -383,7 +424,10 @@ if __name__ == "__main__":
           f"{len(parser.heroes)} героев, {len(parser.hero_classes)} классов героев")
 
     local_ip = get_local_ip()
+    external_ip = get_external_ip()
     print(f"\nСервер запущен: http://{local_ip}:5000")
-    print(f"Для второго игрока: откройте http://{local_ip}:5000 в браузере")
+    if external_ip != local_ip:
+        print(f"Внешний IP: http://{external_ip}:5000")
+    print(f"Для второго игрока: откройте http://{external_ip}:5000 в браузере")
 
     socketio.run(app, host="0.0.0.0", port=5000, debug=False, allow_unsafe_werkzeug=True)
