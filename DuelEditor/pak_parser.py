@@ -283,6 +283,13 @@ class MultiPakParser:
         path = href.split("#")[0]
         return path.lstrip("/")
 
+    def _parse_xpointer(self, href: str) -> str:
+        """Extract element name from #xpointer(/ElementName) fragment."""
+        if "#xpointer(" in href:
+            fragment = href.split("#xpointer(")[1].rstrip(")")
+            return fragment.strip("/")
+        return ""
+
     def _get_text(self, elem: Optional[ET.Element], tag: str, default: str = "") -> str:
         if elem is None:
             return default
@@ -302,11 +309,29 @@ class MultiPakParser:
         text = self._get_text(elem, tag)
         return text.lower() == "true" if text else default
 
-    def _resolve_icon_dds(self, icon_xdb_path: str) -> str:
+    def _resolve_icon_dds(self, icon_xdb_path: str, xpointer_elem: str = "") -> str:
         root = self._read_xml(icon_xdb_path)
         if root is None:
             return ""
+        # If xpointer specifies a sub-element, search inside it first
+        if xpointer_elem:
+            sub = root.find(xpointer_elem)
+            if sub is not None:
+                dest = sub.find("DestName")
+                if dest is not None:
+                    href = dest.get("href", "")
+                    if href:
+                        parent = str(PurePosixPath(icon_xdb_path).parent)
+                        return f"{parent}/{href}"
+        # Direct child search
         dest = root.find("DestName")
+        if dest is not None:
+            href = dest.get("href", "")
+            if href:
+                parent = str(PurePosixPath(icon_xdb_path).parent)
+                return f"{parent}/{href}"
+        # Deep search fallback
+        dest = root.find(".//DestName")
         if dest is not None:
             href = dest.get("href", "")
             if href:
@@ -426,7 +451,7 @@ class MultiPakParser:
             href = icon128.get("href", "")
             icon_xdb_path = self._resolve_href(href)
             if icon_xdb_path:
-                creature.icon_path = self._resolve_icon_dds(icon_xdb_path)
+                creature.icon_path = self._resolve_icon_dds(icon_xdb_path, self._parse_xpointer(href))
 
     # ---- Combat Abilities ----
 
@@ -499,7 +524,7 @@ class MultiPakParser:
                 if href:
                     icon_xdb = self._resolve_href(href)
                     if icon_xdb:
-                        spell.icon_path = self._resolve_icon_dds(icon_xdb)
+                        spell.icon_path = self._resolve_icon_dds(icon_xdb, self._parse_xpointer(href))
             spell.trained_cost = spell.mana_cost
             # Detect MASS/EMPOWERED spells by spell ID or name
             upper_sid = sid.upper()
@@ -576,7 +601,7 @@ class MultiPakParser:
                     if href:
                         icon_xdb = self._resolve_href(href)
                         if icon_xdb:
-                            skill.icon_path = self._resolve_icon_dds(icon_xdb)
+                            skill.icon_path = self._resolve_icon_dds(icon_xdb, self._parse_xpointer(href))
                         break
             if not skill.name:
                 skill.name = sid.replace("HERO_SKILL_", "").replace("_", " ").title()
@@ -618,7 +643,7 @@ class MultiPakParser:
                 if href:
                     icon_xdb = self._resolve_href(href)
                     if icon_xdb:
-                        art.icon_path = self._resolve_icon_dds(icon_xdb)
+                        art.icon_path = self._resolve_icon_dds(icon_xdb, self._parse_xpointer(href))
             stats_elem = obj.find("HeroStatsModif")
             if stats_elem is not None:
                 art.stats = {
@@ -684,7 +709,7 @@ class MultiPakParser:
             if href:
                 icon_xdb = self._resolve_href(href)
                 if icon_xdb:
-                    hero.icon_path = self._resolve_icon_dds(icon_xdb)
+                    hero.icon_path = self._resolve_icon_dds(icon_xdb, self._parse_xpointer(href))
 
         spec_name_ref = root.find("SpecializationNameFileRef")
         if spec_name_ref is not None:
