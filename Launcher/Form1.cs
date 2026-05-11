@@ -985,7 +985,7 @@ namespace Launcher
             trainProgress.Size = new Size(panel.Width - 60, 40);
             trainProgress.Location = new Point(30, 55);
             trainProgress.Visible = false;
-            trainProgress.BackColor = Color.FromArgb(30, 0, 0, 0);
+            trainProgress.BackColor = Color.FromArgb(20, 20, 30);
 
             // Привязываем события наведения
             SetHoverHint(btnStartPlain, "Обычный запуск игры без каких-либо изменений");
