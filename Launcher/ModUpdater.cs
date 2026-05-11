@@ -19,6 +19,7 @@ namespace Launcher
         public string download_url { get; set; } = "";
         public string changelog { get; set; } = "";
         public string sha256 { get; set; } = "";
+        public long file_size { get; set; }
     }
 
     /// <summary>
@@ -297,6 +298,5 @@ namespace Launcher
             return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
         }
 
-        public long file_size { get; set; }
     }
 }
