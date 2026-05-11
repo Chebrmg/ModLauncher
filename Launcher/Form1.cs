@@ -854,12 +854,12 @@ namespace Launcher
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.ClientSize = new Size(600, 470);
+            this.ClientSize = new Size(600, 530);
             this.Text = "ModLauncher";
 
             // ОСНОВНАЯ ПАНЕЛЬ (с двойной буферизацией)
             Panel panel = new DoubleBufferedPanel();
-            panel.Size = new Size(500, 340);
+            panel.Size = new Size(500, 400);
             panel.Location = new Point(50, 60);
             panel.BackColor = Color.FromArgb(150, 0, 0, 0);
             this.Controls.Add(panel);
@@ -880,7 +880,7 @@ namespace Launcher
             int gapX = 20;
             int gapY = 15;
             int startX = (panel.Width - btnW * 2 - gapX) / 2;
-            int startY = 110;
+            int startY = 145;
 
             // КНОПКА ЗАПУСК ИГРЫ (без изменений)
             Button btnStartPlain = new Button();
@@ -949,8 +949,8 @@ namespace Launcher
             btnSetPath.BackColor = Color.FromArgb(40, 40, 60);
             btnSetPath.ForeColor = Color.White;
             btnSetPath.Font = new Font("Segoe UI", 9, FontStyle.Regular);
-            btnSetPath.Size = new Size(100, 30);
-            btnSetPath.Location = new Point(panel.Width - 115, 15);
+            btnSetPath.Size = new Size(100, 28);
+            btnSetPath.Location = new Point(panel.Width - 115, 25);
             btnSetPath.Click += BtnSetGamePath_Click;
 
             // КНОПКА ОБНОВИТЬ ЛАУНЧЕР (скрыта по умолчанию)
@@ -968,7 +968,7 @@ namespace Launcher
             btnUpdateLauncher.Visible = false;
             btnUpdateLauncher.Click += BtnUpdateLauncher_Click;
 
-            // СТАТУС ОБНОВЛЕНИЯ МОДА
+            // СТАТУС ОБНОВЛЕНИЯ МОДА (под заголовком)
             statusLabel = new Label();
             statusLabel.Parent = panel;
             statusLabel.Text = "";
@@ -976,14 +976,14 @@ namespace Launcher
             statusLabel.BackColor = Color.Transparent;
             statusLabel.Font = new Font("Segoe UI", 9, FontStyle.Regular);
             statusLabel.Size = new Size(panel.Width - 40, 20);
-            statusLabel.Location = new Point(20, 80);
+            statusLabel.Location = new Point(20, 65);
             statusLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-            // АНИМИРОВАННЫЙ ПРОГРЕСС-БАР (поезд догоняет бегущего)
+            // АНИМИРОВАННЫЙ ПРОГРЕСС-БАР (между статусом и кнопками)
             trainProgress = new TrainProgressBar();
             trainProgress.Parent = panel;
             trainProgress.Size = new Size(panel.Width - 60, 40);
-            trainProgress.Location = new Point(30, 55);
+            trainProgress.Location = new Point(30, 90);
             trainProgress.Visible = false;
             trainProgress.BackColor = Color.FromArgb(20, 20, 30);
 
