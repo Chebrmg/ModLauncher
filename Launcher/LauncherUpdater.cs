@@ -144,12 +144,24 @@ namespace Launcher
             int pid = Process.GetCurrentProcess().Id;
             string launcherExe = Path.GetFileName(Process.GetCurrentProcess().MainModule?.FileName ?? "Launcher.exe");
 
-            Process.Start(new ProcessStartInfo
+            // Убираем trailing слеш — иначе \" ломает парсинг аргументов
+            string targetDir = _launcherDir.TrimEnd('\\', '/');
+
+            var psi = new ProcessStartInfo
             {
                 FileName = updaterExe,
-                Arguments = $"--pid {pid} --zip \"{zipPath}\" --target \"{_launcherDir}\" --launcher \"{launcherExe}\"",
-                UseShellExecute = true
-            });
+                UseShellExecute = false
+            };
+            psi.ArgumentList.Add("--pid");
+            psi.ArgumentList.Add(pid.ToString());
+            psi.ArgumentList.Add("--zip");
+            psi.ArgumentList.Add(zipPath);
+            psi.ArgumentList.Add("--target");
+            psi.ArgumentList.Add(targetDir);
+            psi.ArgumentList.Add("--launcher");
+            psi.ArgumentList.Add(launcherExe);
+
+            Process.Start(psi);
 
             Application.Exit();
         }

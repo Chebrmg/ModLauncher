@@ -28,14 +28,28 @@ namespace Updater
 
             for (int i = 0; i < args.Length - 1; i++)
             {
-                switch (args[i])
+                switch (args[i].ToLower())
                 {
-                    case "--pid": int.TryParse(args[i + 1], out pid); break;
-                    case "--zip": zipPath = args[i + 1]; break;
-                    case "--target": targetDir = args[i + 1]; break;
-                    case "--launcher": launcherExe = args[i + 1]; break;
+                    case "--pid": int.TryParse(args[i + 1], out pid); i++; break;
+                    case "--zip": zipPath = args[i + 1]; i++; break;
+                    case "--target": targetDir = args[i + 1]; i++; break;
+                    case "--launcher": launcherExe = args[i + 1]; i++; break;
                 }
             }
+
+            // Логируем аргументы для отладки
+            string debugLog = $"args.Length={args.Length}\n";
+            for (int i = 0; i < args.Length; i++)
+                debugLog += $"  args[{i}]=\"{args[i]}\"\n";
+            debugLog += $"\nzip={zipPath}\ntarget={targetDir}\nlauncher={launcherExe}\npid={pid}";
+
+            try
+            {
+                string logPath = Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory, "updater_debug.log");
+                File.WriteAllText(logPath, debugLog);
+            }
+            catch { }
 
             if (zipPath == null || targetDir == null || launcherExe == null)
             {
