@@ -5,6 +5,9 @@ using System.IO;
 using System.IO.Compression;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace Launcher
@@ -12,6 +15,12 @@ namespace Launcher
     public partial class Form1 : Form
     {
         string root = AppDomain.CurrentDomain.BaseDirectory;
+
+        // Обновление мода
+        private ModUpdater? modUpdater;
+        private string serverConfigPath;
+        private Label? statusLabel;
+        private ProgressBar? downloadProgress;
 
         // Автосохранения
         private bool autoSaveActive = false;
@@ -35,6 +44,32 @@ namespace Launcher
 
             InitializeComponent();
             autoSaveConfigPath = Path.Combine(root, "autosave_status.txt");
+            serverConfigPath = Path.Combine(root, "server_config.json");
+            InitModUpdater();
+        }
+
+        private void InitModUpdater()
+        {
+            string serverUrl = ReadServerUrl();
+            if (!string.IsNullOrEmpty(serverUrl))
+            {
+                modUpdater = new ModUpdater(serverUrl, root);
+            }
+        }
+
+        private string ReadServerUrl()
+        {
+            try
+            {
+                if (File.Exists(serverConfigPath))
+                {
+                    string json = File.ReadAllText(serverConfigPath);
+                    using var doc = JsonDocument.Parse(json);
+                    return doc.RootElement.GetProperty("server_url").GetString() ?? "";
+                }
+            }
+            catch { }
+            return "";
         }
 
         private void btnStartPlain_Click(object sender, EventArgs e)
@@ -128,33 +163,103 @@ namespace Launcher
                 // Если режим мода
                 if (useMod)
                 {
-                    if (!File.Exists(modSource))
+                    // Пробуем скачать/обновить мод с сервера
+                    if (modUpdater != null)
+                    {
+                        SetStatus("Проверка обновлений мода...");
+                        bool needsUpdate = false;
+                        try
+                        {
+                            needsUpdate = Task.Run(() => modUpdater.IsUpdateAvailableAsync()).Result;
+                        }
+                        catch
+                        {
+                            SetStatus("Сервер недоступен, используется локальная версия");
+                        }
+
+                        if (needsUpdate)
+                        {
+                            SetStatus("Скачивание мода...");
+                            ShowDownloadProgress(true);
+
+                            var progress = new Progress<(long downloaded, long total)>(p =>
+                            {
+                                if (p.total > 0 && downloadProgress != null)
+                                {
+                                    int pct = (int)(p.downloaded * 100 / p.total);
+                                    downloadProgress.Value = Math.Min(pct, 100);
+                                    double mb = p.downloaded / (1024.0 * 1024.0);
+                                    double totalMb = p.total / (1024.0 * 1024.0);
+                                    SetStatus($"Скачивание: {mb:F1} / {totalMb:F1} МБ ({pct}%)");
+                                }
+                            });
+
+                            bool ok = false;
+                            try
+                            {
+                                ok = Task.Run(() => modUpdater.DownloadModAsync(progress, CancellationToken.None)).Result;
+                            }
+                            catch { }
+
+                            ShowDownloadProgress(false);
+
+                            if (ok)
+                            {
+                                SetStatus("Мод обновлён!");
+                            }
+                            else
+                            {
+                                SetStatus("Ошибка скачивания, используется локальная версия");
+                            }
+                        }
+                        else
+                        {
+                            SetStatus("Мод актуален");
+                        }
+                    }
+
+                    // Определяем имя файла мода
+                    string actualModSource = modSource;
+                    if (modUpdater != null)
+                    {
+                        var remote = Task.Run(() => modUpdater.GetRemoteVersionAsync()).Result;
+                        if (remote != null)
+                        {
+                            string serverModFile = Path.Combine(root, remote.file_name);
+                            if (File.Exists(serverModFile))
+                                actualModSource = serverModFile;
+                        }
+                    }
+
+                    if (!File.Exists(actualModSource))
                     {
                         MessageBox.Show(
-                            "❌ Критическая ошибка:\nChebovka1.5.2.pak не найден!",
+                            "Мод не найден!\n\nПроверьте подключение к серверу или наличие файла мода.",
                             "Ошибка",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Error
                         );
-                        Application.Exit();
+                        SetStatus("");
                         return;
                     }
 
                     try
                     {
-                        File.Copy(modSource, modTarget, true);
+                        File.Copy(actualModSource, modTarget, true);
                     }
                     catch (Exception ex)
                     {
                         MessageBox.Show(
-                            "❌ Ошибка установки мода:\n" + ex.Message,
+                            "Ошибка установки мода:\n" + ex.Message,
                             "Ошибка",
                             MessageBoxButtons.OK,
                             MessageBoxIcon.Error
                         );
-                        Application.Exit();
+                        SetStatus("");
                         return;
                     }
+
+                    SetStatus("");
                 }
 
                 // Запуск
@@ -493,6 +598,63 @@ namespace Launcher
             return hundreds.ToString() + tens.ToString() + units.ToString();
         }
 
+        private void SetStatus(string text)
+        {
+            if (statusLabel != null)
+            {
+                if (statusLabel.InvokeRequired)
+                    statusLabel.Invoke(() => statusLabel.Text = text);
+                else
+                    statusLabel.Text = text;
+            }
+        }
+
+        private void ShowDownloadProgress(bool visible)
+        {
+            if (downloadProgress != null)
+            {
+                if (downloadProgress.InvokeRequired)
+                    downloadProgress.Invoke(() => { downloadProgress.Visible = visible; downloadProgress.Value = 0; });
+                else
+                {
+                    downloadProgress.Visible = visible;
+                    downloadProgress.Value = 0;
+                }
+            }
+        }
+
+        private async void CheckModUpdateOnLoad()
+        {
+            if (modUpdater == null)
+            {
+                SetStatus("Сервер не настроен (server_config.json)");
+                return;
+            }
+
+            SetStatus("Проверка обновлений...");
+            try
+            {
+                var remote = await modUpdater.GetRemoteVersionAsync();
+                if (remote == null)
+                {
+                    SetStatus("Сервер недоступен");
+                    return;
+                }
+
+                string localVer = modUpdater.GetLocalVersion() ?? "не установлен";
+                bool updateAvailable = await modUpdater.IsUpdateAvailableAsync();
+
+                if (updateAvailable)
+                    SetStatus($"Доступна новая версия: {remote.version} (текущая: {localVer})");
+                else
+                    SetStatus($"Мод {remote.mod_name} v{remote.version} — актуален");
+            }
+            catch
+            {
+                SetStatus("Ошибка проверки обновлений");
+            }
+        }
+
         private void SetHoverHint(Button btn, string hint)
         {
             btn.MouseEnter += (s, ev) =>
@@ -605,11 +767,33 @@ namespace Launcher
             hintLabel.TextAlign = ContentAlignment.MiddleCenter;
             hintLabel.BackColor = Color.Transparent;
 
+            // СТАТУС ОБНОВЛЕНИЯ МОДА
+            statusLabel = new Label();
+            statusLabel.Parent = panel;
+            statusLabel.Text = "";
+            statusLabel.ForeColor = Color.FromArgb(220, 200, 220, 255);
+            statusLabel.BackColor = Color.Transparent;
+            statusLabel.Font = new Font("Segoe UI", 9, FontStyle.Regular);
+            statusLabel.Size = new Size(panel.Width - 40, 20);
+            statusLabel.Location = new Point(20, 80);
+            statusLabel.TextAlign = ContentAlignment.MiddleCenter;
+
+            // ПРОГРЕСС-БАР СКАЧИВАНИЯ
+            downloadProgress = new ProgressBar();
+            downloadProgress.Parent = panel;
+            downloadProgress.Size = new Size(panel.Width - 80, 12);
+            downloadProgress.Location = new Point(40, 95);
+            downloadProgress.Visible = false;
+            downloadProgress.Style = ProgressBarStyle.Continuous;
+
             // Привязываем события наведения
             SetHoverHint(btnStartPlain, "Обычный запуск игры без каких-либо изменений");
             SetHoverHint(btnStart, "Запуск с обновлением архивов и файлов мода");
-            SetHoverHint(btnStartMod, "Дополнительно загружает мод Chebovka");
+            SetHoverHint(btnStartMod, "Скачивает/обновляет мод Chebovka с сервера и запускает");
             SetHoverHint(btnAutoSave, "Мониторинг и копирование автосохранений игры");
+
+            // Проверяем обновления мода при загрузке
+            CheckModUpdateOnLoad();
 
             // Восстанавливаем состояние из конфига
             if (ReadAutoSaveStatus() == "on")
