@@ -16,11 +16,21 @@ namespace Launcher
     {
         string root = AppDomain.CurrentDomain.BaseDirectory;
 
+        // Путь к игре (отдельно от лаунчера)
+        private string gamePath = "";
+        private string gameConfigPath;
+
         // Обновление мода
         private ModUpdater? modUpdater;
-        private string serverConfigPath;
+        private string updateConfigPath;
+
+        // Обновление лаунчера
+        private LauncherUpdater? launcherUpdater;
+        private Button? btnUpdateLauncher;
+
+        // UI элементы
         private Label? statusLabel;
-        private ProgressBar? downloadProgress;
+        private TrainProgressBar? trainProgress;
 
         // Автосохранения
         private bool autoSaveActive = false;
@@ -44,37 +54,82 @@ namespace Launcher
 
             InitializeComponent();
             autoSaveConfigPath = Path.Combine(root, "autosave_status.txt");
-            serverConfigPath = Path.Combine(root, "update_config.json");
+            updateConfigPath = Path.Combine(root, "update_config.json");
+            gameConfigPath = Path.Combine(root, "game_path.json");
+            LoadGamePath();
             InitModUpdater();
+            InitLauncherUpdater();
+        }
+
+        private void LoadGamePath()
+        {
+            try
+            {
+                if (File.Exists(gameConfigPath))
+                {
+                    string json = File.ReadAllText(gameConfigPath);
+                    using var doc = JsonDocument.Parse(json);
+                    gamePath = doc.RootElement.GetProperty("game_path").GetString() ?? "";
+                }
+            }
+            catch { }
+        }
+
+        private void SaveGamePath(string path)
+        {
+            gamePath = path;
+            try
+            {
+                string json = JsonSerializer.Serialize(new { game_path = path }, new JsonSerializerOptions { WriteIndented = true });
+                File.WriteAllText(gameConfigPath, json);
+            }
+            catch { }
         }
 
         private void InitModUpdater()
         {
-            string versionUrl = ReadVersionUrl();
+            string versionUrl = ReadConfigValue("version_url");
+            string modDir = string.IsNullOrEmpty(gamePath) ? root : gamePath;
             if (!string.IsNullOrEmpty(versionUrl))
             {
-                modUpdater = new ModUpdater(versionUrl, root);
+                modUpdater = new ModUpdater(versionUrl, modDir);
             }
         }
 
-        private string ReadVersionUrl()
+        private void InitLauncherUpdater()
+        {
+            string launcherUrl = ReadConfigValue("launcher_version_url");
+            if (!string.IsNullOrEmpty(launcherUrl))
+            {
+                launcherUpdater = new LauncherUpdater(launcherUrl, root);
+            }
+        }
+
+        private string ReadConfigValue(string key)
         {
             try
             {
-                if (File.Exists(serverConfigPath))
+                if (File.Exists(updateConfigPath))
                 {
-                    string json = File.ReadAllText(serverConfigPath);
+                    string json = File.ReadAllText(updateConfigPath);
                     using var doc = JsonDocument.Parse(json);
-                    return doc.RootElement.GetProperty("version_url").GetString() ?? "";
+                    if (doc.RootElement.TryGetProperty(key, out var val))
+                        return val.GetString() ?? "";
                 }
             }
             catch { }
             return "";
         }
 
+        private string GetGameRoot()
+        {
+            return string.IsNullOrEmpty(gamePath) ? root : gamePath;
+        }
+
         private void btnStartPlain_Click(object sender, EventArgs e)
         {
-            // Если игра уже запущена — просто скрываемся/закрываемся
+            if (!ValidateGamePath()) return;
+
             if (Process.GetProcessesByName("H5_Game").Length > 0)
             {
                 if (autoSaveActive)
@@ -84,9 +139,24 @@ namespace Launcher
                 return;
             }
 
-            string binPath = Path.Combine(root, "bin");
+            string gameRoot = GetGameRoot();
+            string binPath = Path.Combine(gameRoot, "bin");
             string gameExe = Path.Combine(binPath, "H5_Game.exe");
             StartGame(binPath, gameExe);
+        }
+
+        private bool ValidateGamePath()
+        {
+            string gameRoot = GetGameRoot();
+            string gameExe = Path.Combine(gameRoot, "bin", "H5_Game.exe");
+            if (!File.Exists(gameExe))
+            {
+                MessageBox.Show(
+                    "Игра не найдена!\n\nУкажите путь к папке с игрой через кнопку \"Указать путь\".\n\nОжидается: " + gameExe,
+                    "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return false;
+            }
+            return true;
         }
 
         private void btnStart_Click(object sender, EventArgs e)
@@ -101,16 +171,19 @@ namespace Launcher
 
         void RunGame(bool useMod)
         {
-            string dataPath = Path.Combine(root, "data");
-            string mapsPath = Path.Combine(root, "maps");
-            string binPath = Path.Combine(root, "bin");
+            if (!ValidateGamePath()) return;
+
+            string gameRoot = GetGameRoot();
+            string dataPath = Path.Combine(gameRoot, "data");
+            string mapsPath = Path.Combine(gameRoot, "maps");
+            string binPath = Path.Combine(gameRoot, "bin");
 
             string modePak = Path.Combine(dataPath, "Mode_Modifier.pak");
-            string tempPak = Path.Combine(root, "Mode_Modifier.pak");
+            string tempPak = Path.Combine(gameRoot, "Mode_Modifier.pak");
 
             string gameExe = Path.Combine(binPath, "H5_Game.exe");
 
-            string modSource = Path.Combine(root, "Chebovka1.5.2.pak");
+            string modSource = Path.Combine(gameRoot, "Chebovka1.5.2.pak");
             string modTarget = Path.Combine(dataPath, "Chebovka1.5.2.pak");
 
             try
@@ -180,14 +253,14 @@ namespace Launcher
                         if (needsUpdate)
                         {
                             SetStatus("Скачивание мода...");
-                            ShowDownloadProgress(true);
+                            ShowTrainProgress(true);
 
                             var progress = new Progress<(long downloaded, long total)>(p =>
                             {
-                                if (p.total > 0 && downloadProgress != null)
+                                if (p.total > 0 && trainProgress != null)
                                 {
                                     int pct = (int)(p.downloaded * 100 / p.total);
-                                    downloadProgress.Value = Math.Min(pct, 100);
+                                    trainProgress.Value = Math.Min(pct, 100);
                                     double mb = p.downloaded / (1024.0 * 1024.0);
                                     double totalMb = p.total / (1024.0 * 1024.0);
                                     SetStatus($"Скачивание: {mb:F1} / {totalMb:F1} МБ ({pct}%)");
@@ -204,7 +277,7 @@ namespace Launcher
                                 msg = ex.InnerException?.Message ?? ex.Message;
                             }
 
-                            ShowDownloadProgress(false);
+                            ShowTrainProgress(false);
                             SetStatus(ok ? msg : "Ошибка: " + msg);
                         }
                         else
@@ -220,7 +293,7 @@ namespace Launcher
                         var remote = Task.Run(() => modUpdater.GetRemoteVersionAsync()).Result;
                         if (remote != null)
                         {
-                            string downloadedModFile = Path.Combine(root, remote.file_name);
+                            string downloadedModFile = Path.Combine(gameRoot, remote.file_name);
                             if (File.Exists(downloadedModFile))
                                 actualModSource = downloadedModFile;
                         }
@@ -480,7 +553,7 @@ namespace Launcher
         private List<string> GetAllSaveFiles()
         {
             var result = new List<string>();
-            string profilesPath = Path.Combine(root, "UniverseTeam", "Universe Mod", "Profiles");
+            string profilesPath = Path.Combine(GetGameRoot(), "UniverseTeam", "Universe Mod", "Profiles");
 
             if (!Directory.Exists(profilesPath))
                 return result;
@@ -604,16 +677,26 @@ namespace Launcher
             }
         }
 
-        private void ShowDownloadProgress(bool visible)
+        private void ShowTrainProgress(bool visible)
         {
-            if (downloadProgress != null)
+            if (trainProgress != null)
             {
-                if (downloadProgress.InvokeRequired)
-                    downloadProgress.Invoke(() => { downloadProgress.Visible = visible; downloadProgress.Value = 0; });
+                if (trainProgress.InvokeRequired)
+                {
+                    trainProgress.Invoke(() =>
+                    {
+                        trainProgress.Visible = visible;
+                        trainProgress.Value = 0;
+                        if (visible) trainProgress.StartAnimation();
+                        else trainProgress.StopAnimation();
+                    });
+                }
                 else
                 {
-                    downloadProgress.Visible = visible;
-                    downloadProgress.Value = 0;
+                    trainProgress.Visible = visible;
+                    trainProgress.Value = 0;
+                    if (visible) trainProgress.StartAnimation();
+                    else trainProgress.StopAnimation();
                 }
             }
         }
@@ -640,13 +723,108 @@ namespace Launcher
                 bool updateAvailable = await modUpdater.IsUpdateAvailableAsync();
 
                 if (updateAvailable)
-                    SetStatus($"Доступна новая версия: {remote.version} (текущая: {localVer})");
+                    SetStatus($"Доступна новая версия мода: {remote.version} (текущая: {localVer})");
                 else
                     SetStatus($"Мод {remote.mod_name} v{remote.version} — актуален");
             }
             catch
             {
                 SetStatus("Ошибка проверки обновлений");
+            }
+
+            // Проверяем обновление лаунчера
+            await CheckLauncherUpdateAsync();
+        }
+
+        private async Task CheckLauncherUpdateAsync()
+        {
+            if (launcherUpdater == null) return;
+
+            try
+            {
+                bool hasUpdate = await launcherUpdater.IsUpdateAvailableAsync();
+                if (hasUpdate && btnUpdateLauncher != null)
+                {
+                    var remote = await launcherUpdater.GetRemoteVersionAsync();
+                    string ver = remote?.version ?? "?";
+                    btnUpdateLauncher.Text = $"Обновить лаунчер (v{ver})";
+                    btnUpdateLauncher.Visible = true;
+                }
+            }
+            catch { }
+        }
+
+        private async void BtnUpdateLauncher_Click(object? sender, EventArgs e)
+        {
+            if (launcherUpdater == null) return;
+
+            if (btnUpdateLauncher != null)
+                btnUpdateLauncher.Enabled = false;
+
+            SetStatus("Скачивание обновления лаунчера...");
+            ShowTrainProgress(true);
+
+            var progress = new Progress<(long downloaded, long total)>(p =>
+            {
+                if (p.total > 0 && trainProgress != null)
+                {
+                    int pct = (int)(p.downloaded * 100 / p.total);
+                    trainProgress.Value = Math.Min(pct, 100);
+                    double mb = p.downloaded / (1024.0 * 1024.0);
+                    double totalMb = p.total / (1024.0 * 1024.0);
+                    SetStatus($"Обновление лаунчера: {mb:F1} / {totalMb:F1} МБ ({pct}%)");
+                }
+            });
+
+            var (ok, result) = await launcherUpdater.DownloadUpdateAsync(progress);
+
+            ShowTrainProgress(false);
+
+            if (ok)
+            {
+                SetStatus("Перезапуск лаунчера...");
+                try
+                {
+                    launcherUpdater.LaunchUpdaterAndExit(result);
+                }
+                catch (Exception ex)
+                {
+                    SetStatus("Ошибка: " + ex.Message);
+                    if (btnUpdateLauncher != null) btnUpdateLauncher.Enabled = true;
+                }
+            }
+            else
+            {
+                SetStatus("Ошибка обновления: " + result);
+                if (btnUpdateLauncher != null) btnUpdateLauncher.Enabled = true;
+            }
+        }
+
+        private void BtnSetGamePath_Click(object? sender, EventArgs e)
+        {
+            using var dialog = new FolderBrowserDialog();
+            dialog.Description = "Выберите папку с игрой (где находится папка bin с H5_Game.exe)";
+            dialog.UseDescriptionForTitle = true;
+
+            if (!string.IsNullOrEmpty(gamePath) && Directory.Exists(gamePath))
+                dialog.SelectedPath = gamePath;
+
+            if (dialog.ShowDialog() == DialogResult.OK)
+            {
+                string selected = dialog.SelectedPath;
+                string testExe = Path.Combine(selected, "bin", "H5_Game.exe");
+                if (File.Exists(testExe))
+                {
+                    SaveGamePath(selected);
+                    InitModUpdater();
+                    SetStatus($"Путь к игре: {selected}");
+                }
+                else
+                {
+                    MessageBox.Show(
+                        "В выбранной папке не найден bin\\H5_Game.exe.\nВыберите корневую папку игры.",
+                        "Неверная папка", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
             }
         }
 
@@ -676,12 +854,12 @@ namespace Launcher
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.ClientSize = new Size(600, 430);
+            this.ClientSize = new Size(600, 470);
             this.Text = "ModLauncher";
 
             // ОСНОВНАЯ ПАНЕЛЬ (с двойной буферизацией)
             Panel panel = new DoubleBufferedPanel();
-            panel.Size = new Size(500, 290);
+            panel.Size = new Size(500, 340);
             panel.Location = new Point(50, 60);
             panel.BackColor = Color.FromArgb(150, 0, 0, 0);
             this.Controls.Add(panel);
@@ -762,6 +940,34 @@ namespace Launcher
             hintLabel.TextAlign = ContentAlignment.MiddleCenter;
             hintLabel.BackColor = Color.Transparent;
 
+            // КНОПКА УКАЗАТЬ ПУТЬ
+            Button btnSetPath = new Button();
+            btnSetPath.Parent = panel;
+            btnSetPath.Text = "Указать путь";
+            btnSetPath.FlatStyle = FlatStyle.Flat;
+            btnSetPath.FlatAppearance.BorderSize = 0;
+            btnSetPath.BackColor = Color.FromArgb(40, 40, 60);
+            btnSetPath.ForeColor = Color.White;
+            btnSetPath.Font = new Font("Segoe UI", 9, FontStyle.Regular);
+            btnSetPath.Size = new Size(100, 30);
+            btnSetPath.Location = new Point(panel.Width - 115, 15);
+            btnSetPath.Click += BtnSetGamePath_Click;
+
+            // КНОПКА ОБНОВИТЬ ЛАУНЧЕР (скрыта по умолчанию)
+            btnUpdateLauncher = new Button();
+            btnUpdateLauncher.Parent = panel;
+            btnUpdateLauncher.Text = "Обновить лаунчер";
+            btnUpdateLauncher.FlatStyle = FlatStyle.Flat;
+            btnUpdateLauncher.FlatAppearance.BorderSize = 1;
+            btnUpdateLauncher.FlatAppearance.BorderColor = Color.FromArgb(255, 200, 50);
+            btnUpdateLauncher.BackColor = Color.FromArgb(120, 80, 0);
+            btnUpdateLauncher.ForeColor = Color.FromArgb(255, 230, 100);
+            btnUpdateLauncher.Font = new Font("Segoe UI", 10, FontStyle.Bold);
+            btnUpdateLauncher.Size = new Size(panel.Width - 80, 35);
+            btnUpdateLauncher.Location = new Point(40, startY + (btnH + gapY) * 2 + 5);
+            btnUpdateLauncher.Visible = false;
+            btnUpdateLauncher.Click += BtnUpdateLauncher_Click;
+
             // СТАТУС ОБНОВЛЕНИЯ МОДА
             statusLabel = new Label();
             statusLabel.Parent = panel;
@@ -773,19 +979,24 @@ namespace Launcher
             statusLabel.Location = new Point(20, 80);
             statusLabel.TextAlign = ContentAlignment.MiddleCenter;
 
-            // ПРОГРЕСС-БАР СКАЧИВАНИЯ
-            downloadProgress = new ProgressBar();
-            downloadProgress.Parent = panel;
-            downloadProgress.Size = new Size(panel.Width - 80, 12);
-            downloadProgress.Location = new Point(40, 95);
-            downloadProgress.Visible = false;
-            downloadProgress.Style = ProgressBarStyle.Continuous;
+            // АНИМИРОВАННЫЙ ПРОГРЕСС-БАР (поезд догоняет бегущего)
+            trainProgress = new TrainProgressBar();
+            trainProgress.Parent = panel;
+            trainProgress.Size = new Size(panel.Width - 60, 40);
+            trainProgress.Location = new Point(30, 55);
+            trainProgress.Visible = false;
+            trainProgress.BackColor = Color.Transparent;
 
             // Привязываем события наведения
             SetHoverHint(btnStartPlain, "Обычный запуск игры без каких-либо изменений");
             SetHoverHint(btnStart, "Запуск с обновлением архивов и файлов мода");
             SetHoverHint(btnStartMod, "Проверяет обновления мода и запускает игру");
             SetHoverHint(btnAutoSave, "Мониторинг и копирование автосохранений игры");
+            SetHoverHint(btnSetPath, "Указать папку с игрой");
+
+            // Показываем текущий путь к игре
+            if (!string.IsNullOrEmpty(gamePath))
+                SetStatus($"Игра: {gamePath}");
 
             // Проверяем обновления мода при загрузке
             CheckModUpdateOnLoad();
