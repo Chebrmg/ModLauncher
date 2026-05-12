@@ -22,7 +22,6 @@ namespace Launcher
 
         // Обновление мода
         private ModUpdater? modUpdater;
-        private string updateConfigPath;
 
         // Обновление лаунчера
         private LauncherUpdater? launcherUpdater;
@@ -31,6 +30,7 @@ namespace Launcher
         // UI элементы
         private Label? statusLabel;
         private TrainProgressBar? trainProgress;
+        private Button? btnSetPath;
 
         // Автосохранения
         private bool autoSaveActive = false;
@@ -54,7 +54,6 @@ namespace Launcher
 
             InitializeComponent();
             autoSaveConfigPath = Path.Combine(root, "autosave_status.txt");
-            updateConfigPath = Path.Combine(root, "update_config.json");
             gameConfigPath = Path.Combine(root, "game_path.json");
             LoadGamePath();
             InitModUpdater();
@@ -86,39 +85,19 @@ namespace Launcher
             catch { }
         }
 
+        // Хардкод ссылки на Google Drive
+        private const string VERSION_URL = "https://drive.google.com/uc?export=download&id=1Lc3QEACm3M30oMDQFlJqpTYdx-5_S4Vn";
+        private const string LAUNCHER_VERSION_URL = "https://drive.google.com/uc?export=download&id=1I6PUUYOHFpQXqMMSGu0ZMgCK1RMRw43H";
+
         private void InitModUpdater()
         {
-            string versionUrl = ReadConfigValue("version_url");
             string modDir = string.IsNullOrEmpty(gamePath) ? root : gamePath;
-            if (!string.IsNullOrEmpty(versionUrl))
-            {
-                modUpdater = new ModUpdater(versionUrl, modDir);
-            }
+            modUpdater = new ModUpdater(VERSION_URL, modDir);
         }
 
         private void InitLauncherUpdater()
         {
-            string launcherUrl = ReadConfigValue("launcher_version_url");
-            if (!string.IsNullOrEmpty(launcherUrl))
-            {
-                launcherUpdater = new LauncherUpdater(launcherUrl, root);
-            }
-        }
-
-        private string ReadConfigValue(string key)
-        {
-            try
-            {
-                if (File.Exists(updateConfigPath))
-                {
-                    string json = File.ReadAllText(updateConfigPath);
-                    using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty(key, out var val))
-                        return val.GetString() ?? "";
-                }
-            }
-            catch { }
-            return "";
+            launcherUpdater = new LauncherUpdater(LAUNCHER_VERSION_URL, root);
         }
 
         private string GetGameRoot()
@@ -818,6 +797,11 @@ namespace Launcher
                     SaveGamePath(selected);
                     InitModUpdater();
                     SetStatus($"Путь к игре: {selected}");
+                    if (btnSetPath != null)
+                    {
+                        btnSetPath.Text = "Указано!";
+                        btnSetPath.BackColor = Color.FromArgb(0, 100, 0);
+                    }
                 }
                 else
                 {
@@ -941,7 +925,7 @@ namespace Launcher
             hintLabel.BackColor = Color.Transparent;
 
             // КНОПКА УКАЗАТЬ ПУТЬ
-            Button btnSetPath = new Button();
+            btnSetPath = new Button();
             btnSetPath.Parent = panel;
             btnSetPath.Text = "Указать путь";
             btnSetPath.FlatStyle = FlatStyle.Flat;
@@ -996,7 +980,11 @@ namespace Launcher
 
             // Показываем текущий путь к игре
             if (!string.IsNullOrEmpty(gamePath))
+            {
                 SetStatus($"Игра: {gamePath}");
+                btnSetPath.Text = "Указано!";
+                btnSetPath.BackColor = Color.FromArgb(0, 100, 0);
+            }
 
             // Проверяем обновления мода при загрузке
             CheckModUpdateOnLoad();
