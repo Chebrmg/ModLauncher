@@ -34,7 +34,7 @@ namespace Launcher
     /// </summary>
     public class LauncherUpdater
     {
-        public static readonly string CurrentVersion = "1.0.0";
+        public static readonly string CurrentVersion = "1.0.0.2";
 
         private readonly string _versionUrl;
         private readonly string _launcherDir;

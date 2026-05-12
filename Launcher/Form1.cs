@@ -183,8 +183,8 @@ namespace Launcher
 
             string gameExe = Path.Combine(binPath, "H5_Game.exe");
 
-            string modSource = Path.Combine(gameRoot, "Chebovka1.5.2.pak");
-            string modTarget = Path.Combine(dataPath, "Chebovka1.5.2.pak");
+            string modSource = Path.Combine(gameRoot, "Chebovka.pak");
+            string modTarget = Path.Combine(dataPath, "Chebovka.pak");
 
             try
             {
@@ -854,7 +854,7 @@ namespace Launcher
             this.FormBorderStyle = FormBorderStyle.FixedSingle;
             this.MaximizeBox = false;
             this.StartPosition = FormStartPosition.CenterScreen;
-            this.ClientSize = new Size(600, 530);
+            this.ClientSize = new Size(600, 430);
             this.Text = "ModLauncher";
 
             // ОСНОВНАЯ ПАНЕЛЬ (с двойной буферизацией)
@@ -871,7 +871,7 @@ namespace Launcher
             title.Font = new Font("Segoe UI", 24, FontStyle.Bold);
             title.AutoSize = true;
             title.Location = new Point(
-                (panel.Width - 310) / 2, 20);
+                (panel.Width - 335) / 2, 20);
             panel.Controls.Add(title);
 
             // Размеры и отступы для сетки 2x2
@@ -936,7 +936,7 @@ namespace Launcher
             hintLabel.BackColor = Color.FromArgb(120, 0, 0, 0);
             hintLabel.Font = new Font("Segoe UI", 10, FontStyle.Italic);
             hintLabel.Size = new Size(panel.Width - 40, 40);
-            hintLabel.Location = new Point(20, panel.Height - 50);
+            hintLabel.Location = new Point(20, panel.Height - 100);
             hintLabel.TextAlign = ContentAlignment.MiddleCenter;
             hintLabel.BackColor = Color.Transparent;
 
@@ -949,8 +949,8 @@ namespace Launcher
             btnSetPath.BackColor = Color.FromArgb(40, 40, 60);
             btnSetPath.ForeColor = Color.White;
             btnSetPath.Font = new Font("Segoe UI", 9, FontStyle.Regular);
-            btnSetPath.Size = new Size(100, 28);
-            btnSetPath.Location = new Point(panel.Width - 115, 25);
+            btnSetPath.Size = new Size(80, 28);
+            btnSetPath.Location = new Point(400, 335);
             btnSetPath.Click += BtnSetGamePath_Click;
 
             // КНОПКА ОБНОВИТЬ ЛАУНЧЕР (скрыта по умолчанию)
@@ -964,7 +964,7 @@ namespace Launcher
             btnUpdateLauncher.ForeColor = Color.FromArgb(255, 230, 100);
             btnUpdateLauncher.Font = new Font("Segoe UI", 10, FontStyle.Bold);
             btnUpdateLauncher.Size = new Size(panel.Width - 80, 35);
-            btnUpdateLauncher.Location = new Point(40, startY + (btnH + gapY) * 2 + 5);
+            btnUpdateLauncher.Location = new Point(40, startY + (btnH + gapY) * 2 - 13);
             btnUpdateLauncher.Visible = false;
             btnUpdateLauncher.Click += BtnUpdateLauncher_Click;
 
@@ -976,14 +976,14 @@ namespace Launcher
             statusLabel.BackColor = Color.Transparent;
             statusLabel.Font = new Font("Segoe UI", 9, FontStyle.Regular);
             statusLabel.Size = new Size(panel.Width - 40, 20);
-            statusLabel.Location = new Point(20, 65);
+            statusLabel.Location = new Point(30, 85);
             statusLabel.TextAlign = ContentAlignment.MiddleCenter;
 
             // АНИМИРОВАННЫЙ ПРОГРЕСС-БАР (между статусом и кнопками)
             trainProgress = new TrainProgressBar();
             trainProgress.Parent = panel;
             trainProgress.Size = new Size(panel.Width - 60, 40);
-            trainProgress.Location = new Point(30, 90);
+            trainProgress.Location = new Point(30, 105);
             trainProgress.Visible = false;
             trainProgress.BackColor = Color.FromArgb(20, 20, 30);
 
